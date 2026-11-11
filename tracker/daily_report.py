@@ -219,7 +219,9 @@ def render(d):
 def send(subject, html_body):
     user, pwd, to = os.environ.get("SMTP_USER"), os.environ.get("SMTP_PASSWORD"), os.environ.get("MAIL_TO")
     if not (user and pwd and to):
-        raise SystemExit("Missing SMTP_USER / SMTP_PASSWORD / MAIL_TO - add them as GitHub Actions secrets.")
+        # Not set up yet: skip quietly instead of failing the scheduled run.
+        print("Email not sent: add SMTP_USER, SMTP_PASSWORD and MAIL_TO as GitHub Actions secrets.")
+        return
     msg = MIMEMultipart("alternative")
     msg["Subject"], msg["From"], msg["To"] = subject, f"Equity Manager Tracker <{user}>", to
     msg.attach(MIMEText("Your email client does not display HTML. Open the dashboard: " + SITE_URL, "plain", "utf-8"))
