@@ -84,7 +84,8 @@ FUNDS = [
 
 EVENTS = [("2026-11-05", "Nov 5, 2026 sell-off")]
 AUTO_EVENT_SIGMA = 3.0
-HISTORY_YEARS = 3
+HISTORY_START = "2019-01-01"   # a year of lookback before the earliest selectable date
+MIN_EVENT_DATE = "2020-01-01"  # earliest date the site's date box accepts
 TRADING_DAYS = 252
 WINDOW_BEFORE, WINDOW_AFTER = 5, 10
 
@@ -139,8 +140,7 @@ def apply_eikon_nav(px, navs):
     return px
 
 
-def fetch_prices(tickers, years):
-    start = (dt.date.today() - dt.timedelta(days=int(365.25 * years) + 10)).isoformat()
+def fetch_prices(tickers, start):
     px = yf.download(tickers, start=start, auto_adjust=True, progress=False)["Close"]
     if isinstance(px, pd.Series):
         px = px.to_frame()
@@ -363,27 +363,22 @@ def _clean(o):
     return o
 
 
-def build_json(px, rets, events, cur_df, bench_df):
-    roll = rets.rolling(20, min_periods=15).std() * np.sqrt(TRADING_DAYS)
-    ev_out = []
-    for ts, meta in events.items():
-        df, market, groups, corrs = event_analysis(rets, px, ts)
-        ev_out.append({"date": ts.strftime("%Y-%m-%d"), "label": meta["label"], "auto": meta["auto"],
-                       "market": market, "rows": df.to_dict("records"), "groups": groups,
-                       "correlations": corrs, "window": event_window(px, ts)})
+def build_json(px, rets, events, cur_df=None, bench_df=None):
+    """Data feed for the website. The site computes every statistic itself from the daily
+    total-return price series, so any date since MIN_EVENT_DATE and any lookback window works."""
+    configured = [pd.Timestamp(d) for d, _ in EVENTS if pd.Timestamp(d) in px.index]
+    default_event = (max(configured) if configured else max(events)) if (configured or events) else px.index[-1]
     return _clean({
         "generated_utc": dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
         "as_of": rets.index[-1].strftime("%Y-%m-%d"),
-        "config": {"auto_event_sigma": AUTO_EVENT_SIGMA, "trading_days": TRADING_DAYS,
-                   "window_before": WINDOW_BEFORE, "window_after": WINDOW_AFTER},
+        "config": {"trading_days": TRADING_DAYS, "window_before": WINDOW_BEFORE, "window_after": WINDOW_AFTER,
+                   "min_date": MIN_EVENT_DATE, "sigma_lookback": 60},
+        "default_event": default_event.strftime("%Y-%m-%d"),
+        "named_events": [{"date": d, "label": l} for d, l in EVENTS],
         "indexes": INDEXES, "style_index": STYLE_INDEX, "sp500": SP500,
         "funds": [{**f, "pricing_basis": pricing_basis(f)} for f in FUNDS],
-        "current": cur_df.to_dict("records"),
-        "current_benchmarks": bench_df.to_dict("records"),
-        "events": ev_out,
         "series": {"dates": [d.strftime("%Y-%m-%d") for d in px.index],
-                   "price": {t: px[t].tolist() for t in px.columns},
-                   "vol20": {t: roll[t].tolist() for t in px.columns}},
+                   "price": {t: [None if pd.isna(v) else round(float(v), 6) for v in px[t].tolist()] for t in px.columns}},
     })
 
 
@@ -619,7 +614,7 @@ def main():
     (site / "data").mkdir(parents=True, exist_ok=True)
 
     print(f"Downloading {len(all_tickers())} price series (Yahoo)...")
-    px = fetch_prices(all_tickers(), HISTORY_YEARS)
+    px = fetch_prices(all_tickers(), HISTORY_START)
 
     lseg = {"status": "public edition" if args.public else "skipped (--no-eikon)", "holdings": {}, "nav": {}}
     if not args.no_eikon:

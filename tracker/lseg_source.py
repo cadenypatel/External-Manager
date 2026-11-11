@@ -42,7 +42,8 @@ CANDIDATES = {
     "holding_shares": ["TR.FundNumberOfShares", "TR.FdSharesHeld"],
     # report date: Eikon's ".date" suffix returns the as-of date of a field's value
     "holding_date":   ["TR.FundPercentageOfFundAssets.date", "TR.FundHoldingName.date",
-                       "TR.FdInvestorPercentPortfolio.date", "TR.FundPortfolioDate", "TR.FundHoldingDate"],
+                       "TR.FundNumberOfShares.date", "TR.FundHoldingsDate", "TR.FundPortfolioHoldingsDate",
+                       "TR.FundLatestHoldingsDate", "TR.FundAsOfDate", "TR.FundPortfolioDate"],
     # daily NAV history
     "nav":            ["TR.FundNAV", "TR.NAV"],
 }
@@ -120,10 +121,12 @@ def resolve_ids(ld, tickers, cfg):
 def _try_field(ld, code, field, params=None):
     """Return the non-empty values a field gives for one instrument, an 'error: ...' string, or None."""
     try:
-        df = ld.get_data(code, [field], parameters=params or {})
-        if df is None or df.empty or df.shape[1] < 2:
+        # Eikon's ".date" fields only resolve next to their base field: request both, read the date column.
+        flds = [field[:-5], field] if field.lower().endswith(".date") else [field]
+        df = ld.get_data(code, flds, parameters=params or {})
+        if df is None or df.empty or df.shape[1] < 1 + len(flds):
             return None
-        vals = df.iloc[:, 1].dropna()
+        vals = df.iloc[:, len(flds)].dropna()
         vals = vals[vals.astype(str).str.strip() != ""]
         return vals if len(vals) else None
     except Exception as e:
@@ -179,13 +182,17 @@ def _field(cfg, key):
     return (cfg.get("fields") or {}).get(key)
 
 
-def get_holdings(ld, code, cfg, fields=None):
-    """Latest holdings for one fund. Returns DataFrame[name, ric, weight, shares, date]."""
+def get_holdings(ld, code, cfg, fields=None, sdate=None):
+    """Holdings for one fund - latest, or as of `sdate` (YYYY-MM-DD) if Eikon has history.
+    Returns DataFrame[name, ric, weight, shares, date]."""
     fields = fields or {k: _field(cfg, k) for k in ("holding_name", "holding_ric", "holding_weight", "holding_shares", "holding_date")}
     use = {k: v for k, v in fields.items() if v}
     if "holding_name" not in use or "holding_weight" not in use:
         raise LsegUnavailable("Holdings fields not configured - run tracker/lseg_check.py first.")
-    df = ld.get_data(code, list(use.values()), parameters=HOLDINGS_PARAMS)
+    params = dict(HOLDINGS_PARAMS)
+    if sdate:
+        params["SDate"] = sdate
+    df = ld.get_data(code, list(use.values()), parameters=params)
     if df is None or df.empty:
         return pd.DataFrame()
     df = df.drop(columns=[c for c in df.columns if c.lower() == "instrument"], errors="ignore")
@@ -215,10 +222,20 @@ def get_nav_history(ld, code, cfg, start, end=None):
 # Snapshots & trades
 # ----------------------------------------------------------------------------
 
-def snapshot_key(df):
+def snapshot_key(df, fallback=None):
+    """Report date: Eikon's as-of date if available, else the date we asked for, else today."""
     if "date" in df and df["date"].notna().any():
-        return pd.to_datetime(df["date"].dropna().iloc[0]).strftime("%Y-%m-%d")
-    return pd.Timestamp.today().strftime("%Y-%m-%d")
+        try:
+            return pd.to_datetime(df["date"].dropna().iloc[0]).strftime("%Y-%m-%d")
+        except Exception:
+            pass
+    return fallback or pd.Timestamp.today().strftime("%Y-%m-%d")
+
+
+def backfill_dates(days=8):
+    """Recent trading days to request (oldest first) - the test for whether Eikon has daily holdings."""
+    end = pd.Timestamp.today().normalize() - pd.offsets.BDay(1)
+    return [d.strftime("%Y-%m-%d") for d in pd.bdate_range(end=end, periods=days)]
 
 
 def _fingerprint(df):
@@ -229,18 +246,20 @@ def _fingerprint(df):
     return out.sort_values(list(out.columns)).to_csv(index=False)
 
 
-def save_snapshot(ticker, df):
+def save_snapshot(ticker, df, fallback_key=None):
     """Save a holdings report under its report date. Returns (key, saved).
-    A report identical to the latest saved one is not saved again, so running daily
-    against a monthly report doesn't create fake 'new' reports."""
+    A report identical to the nearest earlier saved one is not saved again, so a monthly
+    report requested on many days doesn't create fake 'new' reports."""
     d = SNAP_DIR / ticker
     d.mkdir(parents=True, exist_ok=True)
-    key = snapshot_key(df)
-    existing = sorted(d.glob("*.csv"))
-    if existing and existing[-1].stem != key:
+    key = snapshot_key(df, fallback_key)
+    earlier = [p for p in sorted(d.glob("*.csv")) if p.stem < key]
+    later = [p for p in sorted(d.glob("*.csv")) if p.stem > key]
+    fp = _fingerprint(df)
+    for neighbour in ([earlier[-1]] if earlier else []) + ([later[0]] if later else []):
         try:
-            if _fingerprint(pd.read_csv(existing[-1])) == _fingerprint(df):
-                return existing[-1].stem, False
+            if _fingerprint(pd.read_csv(neighbour)) == fp:
+                return neighbour.stem, False
         except Exception:
             pass
     df.to_csv(d / f"{key}.csv", index=False)
@@ -339,7 +358,7 @@ def pull(fund_list, start=None, app_key=None):
         for f in fund_list:
             t = f["ticker"]
             tried = []
-            h = pd.DataFrame()
+            h, code_used = pd.DataFrame(), None
             for cand in [t] + f.get("holdings_alt", []):     # fall back to sibling share classes
                 code = codes.get(cand)
                 if not code:
@@ -351,6 +370,7 @@ def pull(fund_list, start=None, app_key=None):
                     tried.append(f"{cand} ({e})")
                     continue
                 if not h.empty:
+                    code_used = code
                     if cand != t:
                         print(f"  {t}: using holdings from share class {cand} (same portfolio)")
                     break
@@ -358,11 +378,27 @@ def pull(fund_list, start=None, app_key=None):
             if h.empty:
                 err(f"{t}: Eikon returned no holdings - tried {', '.join(tried)}")
                 continue
+
+            # Daily-history test / backfill: ask Eikon for holdings as of each recent trading day.
+            # Identical reports are de-duplicated, so only genuinely different days are kept.
+            new_days = []
+            if len(load_snapshots(t)) < 4:
+                for day in backfill_dates():
+                    try:
+                        hd = get_holdings(ld, code_used, cfg, sdate=day)
+                    except Exception:
+                        continue
+                    if not hd.empty:
+                        k, saved = save_snapshot(t, hd, fallback_key=day)
+                        if saved:
+                            new_days.append(k)
             key, saved = save_snapshot(t, h)
-            print(f"  {t}: {len(h)} holdings, report dated {key}" + ("" if saved else " (already saved)"))
+            dates = [d for d, _ in load_snapshots(t)]
+            print(f"  {t}: {len(h)} holdings, latest report {key}" + ("" if saved else " (unchanged)")
+                  + f" | distinct reports on file: {len(dates)}" + (f" | new from history: {new_days}" if new_days else ""))
             if f["vehicle"] == "ETF" and start is not None:
                 try:
-                    s = get_nav_history(ld, code, cfg, start)
+                    s = get_nav_history(ld, code_used, cfg, start)
                     if len(s):
                         result["nav"][t] = s
                         print(f"  {t}: {len(s)} daily NAVs")
@@ -377,13 +413,14 @@ def pull(fund_list, start=None, app_key=None):
             continue
         latest_date, latest = snaps[-1]
         entry = {"as_of": latest_date, "snapshots": [d for d, _ in snaps],
+                 "holdings": latest.sort_values("weight", ascending=False)[["name", "weight"]].to_dict("records"),
                  "top": latest.sort_values("weight", ascending=False).head(15)[["name", "weight"]].to_dict("records"),
                  "n_holdings": int(len(latest)), "changes": None}
         if len(snaps) >= 2:
             prev_date, prev = snaps[-2]
             ch, flow = diff_holdings(prev, latest)
             entry["changes"] = {"from": prev_date, "to": latest_date, "fund_flow_share_change": flow,
-                                "rows": ch[ch["action"] != "Held"].to_dict("records"),
+                                "rows": ch.to_dict("records"),          # every position, so the site can flag any move
                                 "counts": ch["action"].value_counts().to_dict()}
         result["holdings"][f["ticker"]] = entry
     return result

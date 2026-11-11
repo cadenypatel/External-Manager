@@ -21,6 +21,17 @@
         <a class="btn" href="Manager_Vol_Tracker.xlsx" download>Download Excel</a>
       </div>
     </div>
+    <div class="wrap control-bar">
+      <div class="range-row" role="group" aria-label="Lookback window">
+        <span>Lookback</span>
+        <button data-range="63">3M</button>
+        <button data-range="126">6M</button>
+        <button data-range="252" class="active">1Y</button>
+        <button data-range="756">3Y</button>
+        <button data-range="max">Since 2020</button>
+      </div>
+      <span class="range-note" id="rangeNote">All statistics use this window</span>
+    </div>
     <nav class="wrap tabs" aria-label="Sections">
       <a href="#shock">Shock day</a>
       <a href="#risk">Current risk</a>
@@ -38,22 +49,39 @@
     <section id="shock">
       <div class="section-head">
         <h2>Shock-day analysis</h2>
-        <label class="select-label">Shock day
-          <select id="eventSelect"></select>
-        </label>
+        <div class="event-controls">
+          <label class="select-label">Date
+            <input type="date" id="eventDate" min="2020-01-01">
+          </label>
+          <label class="select-label">Find shock days
+            <select id="sigmaSel">
+              <option value="0">Off</option>
+              <option value="1">≥ 1σ moves</option>
+              <option value="2">≥ 2σ moves</option>
+              <option value="3">≥ 3σ moves</option>
+              <option value="4">≥ 4σ moves</option>
+              <option value="5">≥ 5σ moves</option>
+              <option value="6">≥ 6σ moves</option>
+            </select>
+          </label>
+        </div>
       </div>
-      <p class="hint">Who held up, and was it low volatility, low beta, or stock picking? Pre-event measures use only data from before the shock.</p>
+      <div id="sigmaPanel" class="sigma-panel" hidden>
+        <div class="sigma-head" id="sigmaHead"></div>
+        <div class="sigma-list" id="sigmaList"></div>
+      </div>
+      <p class="hint" id="eventNote">Type any trading day since Jan 1, 2020. Pre-event measures use only data from before that day, over the lookback window chosen at the top.</p>
 
       <div class="tiles" id="marketTiles"></div>
       <div class="finding" id="finding"></div>
 
       <div class="grid-2">
         <figure class="card">
-          <figcaption><strong>Pre-event volatility vs shock-day return</strong><span>60-day annualized volatility before the event</span></figcaption>
+          <figcaption><strong>Pre-event volatility vs shock-day return</strong><span id="capVol">Volatility over the lookback window before the event</span></figcaption>
           <div class="chart-box"><canvas id="scatterVol"></canvas></div>
         </figure>
         <figure class="card">
-          <figcaption><strong>Pre-event beta vs shock-day return</strong><span>1-year beta to the S&amp;P 500 before the event</span></figcaption>
+          <figcaption><strong>Pre-event beta vs shock-day return</strong><span id="capBeta">Beta to the S&amp;P 500 over the lookback window before the event</span></figcaption>
           <div class="chart-box"><canvas id="scatterBeta"></canvas></div>
         </figure>
       </div>
@@ -82,29 +110,20 @@
     <!-- CURRENT RISK -->
     <section id="risk">
       <div class="section-head"><h2>Current risk</h2></div>
-      <p class="hint">Trailing measures as of each fund's latest end-of-day price. Mutual fund NAVs post in the evening, so they can lag the ETFs and indexes by a day. Benchmark-relative figures use each manager's stated benchmark.</p>
+      <p class="hint" id="riskNote">Measured over the lookback window chosen at the top, ending on each fund's latest end-of-day price. Benchmark-relative figures use each manager's stated benchmark.</p>
       <div class="card table-card">
-        <div class="table-title"><strong><span class="dot Growth"></span> Growth peer group</strong><span>Sorted by 20-day volatility, lowest first</span></div>
+        <div class="table-title"><strong><span class="dot Growth"></span> Growth peer group</strong><span>Sorted by volatility, lowest first</span></div>
         <div class="table-scroll"><table id="riskGrowth" class="data"></table></div>
       </div>
       <div class="card table-card">
-        <div class="table-title"><strong><span class="dot Value"></span> Value peer group</strong><span>Sorted by 20-day volatility, lowest first</span></div>
+        <div class="table-title"><strong><span class="dot Value"></span> Value peer group</strong><span>Sorted by volatility, lowest first</span></div>
         <div class="table-scroll"><table id="riskValue" class="data"></table></div>
       </div>
     </section>
 
-    <!-- TIME SERIES -->
-    <div class="range-row" role="group" aria-label="Time range">
-      <span>Range</span>
-      <button data-range="63">3M</button>
-      <button data-range="126">6M</button>
-      <button data-range="252" class="active">1Y</button>
-      <button data-range="9999">Max</button>
-    </div>
-
     <section id="vol">
       <div class="section-head"><h2>Volatility over time</h2></div>
-      <p class="hint">20-day rolling volatility, annualized. Dashed line = style index. Vertical markers = shock days.</p>
+      <p class="hint">20-day rolling volatility, annualized, over the lookback window. Dashed line = style index. Vertical markers = the selected shock day, plus any dates found by the sigma filter.</p>
       <div class="grid-2">
         <figure class="card">
           <figcaption><strong>Growth managers</strong><span>vs Russell 1000 Growth Index (TR)</span></figcaption>
@@ -119,7 +138,7 @@
 
     <section id="perf">
       <div class="section-head"><h2>Performance</h2></div>
-      <p class="hint">Cumulative total return over the selected range, with distributions reinvested.</p>
+      <p class="hint">Cumulative total return over the lookback window, with distributions reinvested.</p>
       <div class="grid-2">
         <figure class="card">
           <figcaption><strong>Growth managers</strong><span>vs Russell 1000 Growth Index (TR)</span></figcaption>
@@ -144,7 +163,7 @@
         <span id="eikonMsg" class="eikon-msg" role="status"></span>
         <p id="eikonHelp" class="hint">Needs Eikon open and <code>start_eikon_helper.bat</code> running on your PC. Your key is sent only to that helper on your own computer (localhost), never to this website or GitHub. Holdings load into your browser only, so no one else sees them.</p>
       </form>
-      <p class="hint">From Refinitiv Eikon (Lipper holdings). Trades are worked out by comparing each manager's two most recent holdings reports. Share changes are net of fund-wide flows: a position counts as added or trimmed only if it moved more than 2 percentage points beyond the fund's overall share change. These are the public fund's trades, not your SMA account's.</p>
+      <p class="hint">From Refinitiv Eikon (Lipper holdings). Each fund is compared with its previous holdings report. A position is <b>flagged</b> if its weight moved by 1.5 percentage points or more, or if it is new or sold out. The fund's biggest change is <span class="primary-swatch">highlighted red</span>, and the fund's box gets a red outline when anything is flagged. These are the public fund's positions, not your SMA account's.</p>
       <div id="holdingsBody"></div>
     </section>
 
@@ -167,25 +186,29 @@
             </ol>
             The stated benchmark and the style index are the same for every manager except Oakmark, which names the S&amp;P 500 as its benchmark and the Russell 1000 Value as secondary.</li>
           <li><b>Benchmarks are the actual total-return indexes</b> (S&amp;P 500 TR, Russell 1000 Growth TR and Russell 1000 Value TR), not ETFs that track them.</li>
-          <li>Beta, correlation, tracking error and up/down capture are measured against the stated benchmark, with beta to the S&amp;P 500 shown alongside.</li>
+          <li><b>The lookback window at the top drives everything:</b> return, volatility, beta, correlation, tracking error, capture and drawdown in Current risk; the pre-event volatility, beta and downside capture in the shock-day analysis (measured over the window ending the day before the shock); and the charts.</li>
+        </ul>
+        <h3>Shock days</h3>
+        <ul>
+          <li><b>Date box:</b> type any trading day since Jan 1, 2020. If markets were closed that day, the previous trading day is used.</li>
+          <li><b>Sigma filter:</b> lists every day in the lookback window when the S&amp;P 500 moved at least that many standard deviations, measured against its own volatility over the prior 60 trading days. Click a date to analyze it.</li>
         </ul>
         <h3>Why the public funds are valid stand-ins for volatility tracking</h3>
         <ul>
-          <li><b>Pricing frequency:</b> every return here is end-of-day, close to close. Mutual funds use the daily NAV struck at 4pm ET, and the two ETFs (GSGO, PVAL) use the 4pm closing price, which normally sits within a few basis points of NAV. No intraday data is used. Daily NAV-based returns are the right basis for volatility, beta and drawdown, because that is how the SMAs' own daily performance is measured.</li>
-          <li><b>Fee drag:</b> each proxy is the lowest-cost share class available (R6, Z, Y or institutional). The fee difference against an SMA is a few basis points a year, about 0.001% a day, which has no measurable effect on volatility or beta.</li>
-          <li><b>Customization, tax-loss harvesting, cash and trade timing:</b> these make an individual SMA account drift from the model, and they are the main reason SMA and fund returns differ. They mainly add tracking error, so they show up as small differences in daily returns, not as a different risk profile. Compare a proxy with your actual SMA returns before relying on it for any single account.</li>
+          <li><b>Pricing frequency:</b> every return here is end-of-day, close to close. Mutual funds use the daily NAV struck at 4pm ET, and the two ETFs (GSGO, PVAL) use the 4pm closing price, which normally sits within a few basis points of NAV. No intraday data is used.</li>
+          <li><b>Fee drag:</b> each proxy is the lowest-cost share class available. The fee difference against an SMA is about 0.001% a day, which has no measurable effect on volatility or beta.</li>
+          <li><b>Customization, tax-loss harvesting, cash and trade timing</b> mainly add tracking error between an SMA account and the fund, not a different risk profile. Compare a proxy with your actual SMA returns before relying on it for a single account.</li>
         </ul>
         <h3>Definitions</h3>
         <ul>
-          <li><b>Prices</b> are total-return adjusted (dividends and capital gains reinvested), so year-end distributions do not show up as losses.</li>
+          <li><b>Prices</b> are total-return adjusted (dividends and capital gains reinvested).</li>
           <li><b>Volatility</b> = standard deviation of daily returns × √252.</li>
-          <li><b>Beta</b> = covariance with the index ÷ variance of the index, using daily returns over the trailing year.</li>
+          <li><b>Beta</b> = covariance with the index ÷ variance of the index, from daily returns over the window.</li>
           <li><b>Downside capture</b> = the fund's compounded return on days its stated benchmark fell ÷ the benchmark's return on those days. Below 1.00 means it lost less.</li>
-          <li><b>Move in own sigmas</b> = shock-day return ÷ the fund's own daily standard deviation over the prior 60 trading days.</li>
-          <li><b>Beta-predicted</b> = pre-event beta × the S&amp;P 500's shock-day return. <b>Beyond beta</b> = actual − predicted, the part due to stock and sector choices rather than market exposure.</li>
-          <li><b>Shock days</b> are the dates configured in the tracker, plus any day in the last year when the S&amp;P 500 moved at least <span id="sigmaCfg">3</span>σ against its prior 60-day volatility.</li>
-          <li><b>Caveats:</b> mutual funds price once, at the 4pm ET close, so intraday swings that reverse are invisible. GSGO and PVAL are ETFs. Public funds stand in for the SMAs, and actual accounts can differ because of cash, fees, client restrictions and tax-loss harvesting. With 8 managers, cross-manager correlations show direction only.</li>
-          <li><b>Data:</b> Yahoo Finance, refreshed automatically each weekday evening and morning. <span id="generated"></span></li>
+          <li><b>Move in own σ</b> = shock-day return ÷ the fund's own daily standard deviation over the prior 60 trading days.</li>
+          <li><b>Beta-predicted</b> = pre-event beta × the S&amp;P 500's shock-day return. <b>Beyond beta</b> = actual − predicted.</li>
+          <li><b>Caveats:</b> GSGO's history starts Nov 17, 2025 and PVAL's in May 2021, so their figures use whatever history exists. With 4 managers per peer group, rankings and cross-manager correlations show direction only.</li>
+          <li><b>Data:</b> Yahoo Finance. <span id="generated"></span></li>
         </ul>
       </div>
     </section>
