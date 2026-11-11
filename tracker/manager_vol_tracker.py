@@ -67,6 +67,7 @@ FUNDS = [
          source="Alger fund and SMA composite fact sheets"),
     dict(manager="Cantor Fitzgerald LC Focused", ticker="FICIX", style="Growth", vehicle="Mutual fund",
          description="Cantor Fitzgerald Large Cap Focused Fund R6", stated_benchmark=R1G,
+         holdings_alt=["FICHX", "FICGX"],   # Lipper carries holdings on another share class (same portfolio)
          source="Cantor LC Focused SMA fact sheet (S&P 500 shown as secondary comparison)"),
     dict(manager="Putnam US LCV Equity Concentrated", ticker="PVAL", style="Value", vehicle="ETF",
          description="Putnam Focused Large Cap Value ETF", stated_benchmark=R1V,

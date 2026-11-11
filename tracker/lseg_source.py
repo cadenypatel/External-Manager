@@ -22,9 +22,12 @@ writes the ones that work into config/lseg.local.json ("fields": {...}).
 import json
 import os
 import sys
+import warnings
 from pathlib import Path
 
 import pandas as pd
+
+warnings.filterwarnings("ignore", category=FutureWarning, module=r"lseg\.")   # library noise
 
 ROOT = Path(__file__).resolve().parent.parent
 CONFIG_PATH = ROOT / "config" / "lseg.local.json"
@@ -37,7 +40,9 @@ CANDIDATES = {
     "holding_ric":    ["TR.FundHoldingRIC", "TR.FdSecurityOwnedRIC"],
     "holding_weight": ["TR.FundPercentageOfFundAssets", "TR.FdInvestorPercentPortfolio"],
     "holding_shares": ["TR.FundNumberOfShares", "TR.FdSharesHeld"],
-    "holding_date":   ["TR.FundPortfolioDate", "TR.FundHoldingDate", "TR.FdHoldingsDate"],
+    # report date: Eikon's ".date" suffix returns the as-of date of a field's value
+    "holding_date":   ["TR.FundPercentageOfFundAssets.date", "TR.FundHoldingName.date",
+                       "TR.FdInvestorPercentPortfolio.date", "TR.FundPortfolioDate", "TR.FundHoldingDate"],
     # daily NAV history
     "nav":            ["TR.FundNAV", "TR.NAV"],
 }
@@ -125,11 +130,13 @@ def _try_field(ld, code, field, params=None):
         return f"error: {e}"
 
 
-def discover_fields(ld, codes, etf_codes, log=print):
+def discover_fields(ld, codes, etf_codes, log=print, items=None):
     """Try every candidate field and return {item: first field that returns data}.
-    codes: fund instrument codes to test holdings on; etf_codes: for NAV."""
+    codes: fund instrument codes to test holdings on; etf_codes: for NAV; items: subset to test."""
     found = {}
     for item, cands in CANDIDATES.items():
+        if items is not None and item not in items:
+            continue
         targets = etf_codes if item == "nav" else codes[:3]
         if not targets:
             continue
@@ -214,12 +221,30 @@ def snapshot_key(df):
     return pd.Timestamp.today().strftime("%Y-%m-%d")
 
 
+def _fingerprint(df):
+    out = pd.DataFrame({"name": df["name"].astype(str).str.strip()})
+    for c in ("weight", "shares"):
+        if c in df:
+            out[c] = pd.to_numeric(df[c], errors="coerce").round(4)
+    return out.sort_values(list(out.columns)).to_csv(index=False)
+
+
 def save_snapshot(ticker, df):
+    """Save a holdings report under its report date. Returns (key, saved).
+    A report identical to the latest saved one is not saved again, so running daily
+    against a monthly report doesn't create fake 'new' reports."""
     d = SNAP_DIR / ticker
     d.mkdir(parents=True, exist_ok=True)
     key = snapshot_key(df)
+    existing = sorted(d.glob("*.csv"))
+    if existing and existing[-1].stem != key:
+        try:
+            if _fingerprint(pd.read_csv(existing[-1])) == _fingerprint(df):
+                return existing[-1].stem, False
+        except Exception:
+            pass
     df.to_csv(d / f"{key}.csv", index=False)
-    return key
+    return key, True
 
 
 def load_snapshots(ticker):
@@ -292,38 +317,49 @@ def pull(fund_list, start=None, app_key=None):
 
     try:
         tickers = [f["ticker"] for f in fund_list]
-        ids = resolve_ids(ld, tickers, cfg)
-        codes = {t: fund_universe(ids.get(t, {})) for t in tickers}
+        alts = sorted({a for f in fund_list for a in f.get("holdings_alt", [])})
+        ids = resolve_ids(ld, tickers + alts, cfg)
+        codes = {t: fund_universe(ids.get(t, {})) for t in tickers + alts}
 
-        # First connect: work out which field names this Eikon subscription supports.
+        # Work out which field names this Eikon subscription supports (only for items not yet known).
         fields = cfg.get("fields") or {}
-        if not (fields.get("holding_name") and fields.get("holding_weight")):
-            print("  Detecting which Eikon fields your subscription supports (first run only)...")
-            have = [c for c in codes.values() if c]
+        missing = [k for k in CANDIDATES if not fields.get(k)]
+        if missing:
+            print(f"  Detecting supported Eikon fields for: {', '.join(missing)}")
+            have = [codes[t] for t in tickers if codes.get(t)]
             etfs = [codes[f["ticker"]] for f in fund_list if f["vehicle"] == "ETF" and codes.get(f["ticker"])]
-            found = discover_fields(ld, have, etfs)
+            found = discover_fields(ld, have, etfs, items=missing)
             if found:
                 save_fields(found)
                 cfg["fields"] = {**fields, **found}
-            if not (found.get("holding_name") and found.get("holding_weight")):
+            if not (cfg["fields"].get("holding_name") and cfg["fields"].get("holding_weight")):
                 err("Eikon returned no holdings for any candidate field. Your subscription may not include "
                     "Lipper fund holdings - run check_eikon.bat and send the report.")
 
         for f in fund_list:
             t = f["ticker"]
-            code = codes.get(t)
-            if not code:
-                err(f"{t}: Eikon could not find this fund (add its Lipper ID under 'ids' in config/lseg.local.json)")
+            tried = []
+            h = pd.DataFrame()
+            for cand in [t] + f.get("holdings_alt", []):     # fall back to sibling share classes
+                code = codes.get(cand)
+                if not code:
+                    tried.append(f"{cand} (not found)")
+                    continue
+                try:
+                    h = get_holdings(ld, code, cfg)
+                except Exception as e:
+                    tried.append(f"{cand} ({e})")
+                    continue
+                if not h.empty:
+                    if cand != t:
+                        print(f"  {t}: using holdings from share class {cand} (same portfolio)")
+                    break
+                tried.append(f"{cand} (empty)")
+            if h.empty:
+                err(f"{t}: Eikon returned no holdings - tried {', '.join(tried)}")
                 continue
-            try:
-                h = get_holdings(ld, code, cfg)
-                if h.empty:
-                    err(f"{t}: Eikon returned no holdings for {code}")
-                else:
-                    key = save_snapshot(t, h)
-                    print(f"  {t}: {len(h)} holdings as of {key}")
-            except Exception as e:
-                err(f"{t}: holdings failed: {e}")
+            key, saved = save_snapshot(t, h)
+            print(f"  {t}: {len(h)} holdings, report dated {key}" + ("" if saved else " (already saved)"))
             if f["vehicle"] == "ETF" and start is not None:
                 try:
                     s = get_nav_history(ld, code, cfg, start)
