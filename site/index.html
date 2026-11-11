@@ -191,7 +191,7 @@
         <h3>Shock days</h3>
         <ul>
           <li><b>Date box:</b> type any trading day since Jan 1, 2020. If markets were closed that day, the previous trading day is used.</li>
-          <li><b>Sigma filter:</b> lists every day in the lookback window when the S&amp;P 500 moved at least that many standard deviations, measured against its own volatility over the prior 60 trading days. Click a date to analyze it.</li>
+          <li><b>Sigma filter:</b> lists every day in the lookback window when the S&amp;P 500 moved at least that many standard deviations, measured against its own daily volatility over the lookback period ending the day before (3M, 6M, 1Y or 3Y; "Since 2020" uses all history since 2019). A longer lookback usually means a higher baseline and smaller sigma readings. Click a date to analyze it.</li>
         </ul>
         <h3>Why the public funds are valid stand-ins for volatility tracking</h3>
         <ul>
@@ -205,7 +205,8 @@
           <li><b>Volatility</b> = standard deviation of daily returns × √252.</li>
           <li><b>Beta</b> = covariance with the index ÷ variance of the index, from daily returns over the window.</li>
           <li><b>Downside capture</b> = the fund's compounded return on days its stated benchmark fell ÷ the benchmark's return on those days. Below 1.00 means it lost less.</li>
-          <li><b>Move in own σ</b> = shock-day return ÷ the fund's own daily standard deviation over the prior 60 trading days.</li>
+          <li><b>Move in own σ</b> = shock-day return ÷ the fund's own daily standard deviation over the lookback period before the shock.</li>
+          <li><b>Every statistic follows the lookback toggle.</b> The only fixed window is the 20-day smoothing used to draw the rolling-volatility lines.</li>
           <li><b>Beta-predicted</b> = pre-event beta × the S&amp;P 500's shock-day return. <b>Beyond beta</b> = actual − predicted.</li>
           <li><b>Caveats:</b> GSGO's history starts Nov 17, 2025 and PVAL's in May 2021, so their figures use whatever history exists. With 4 managers per peer group, rankings and cross-manager correlations show direction only.</li>
           <li><b>Data:</b> Yahoo Finance. <span id="generated"></span></li>

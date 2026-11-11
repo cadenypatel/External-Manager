@@ -64,14 +64,16 @@
       E.ret[t] = r;
     }
     E.minIdx = Math.max(1, d.findIndex((x) => x >= DATA.config.min_date));
-    const lb = DATA.config.sigma_lookback || 60;
+    // Prefix sums of S&P 500 returns, so the sigma series for any lookback is O(1) per day.
     const s = E.ret[DATA.sp500];
-    E.sigma = new Array(n).fill(null);
-    for (let i = lb; i < n; i++) {
-      if (s[i] == null) continue;
-      const sd = std(nn(s.slice(i - lb, i)));
-      if (sd) E.sigma[i] = s[i] / sd;
+    E.spCnt = new Array(n + 1).fill(0); E.spSum = new Array(n + 1).fill(0); E.spSq = new Array(n + 1).fill(0);
+    for (let i = 0; i < n; i++) {
+      const v = s[i];
+      E.spCnt[i + 1] = E.spCnt[i] + (v != null ? 1 : 0);
+      E.spSum[i + 1] = E.spSum[i] + (v != null ? v : 0);
+      E.spSq[i + 1] = E.spSq[i] + (v != null ? v * v : 0);
     }
+    E.sigmaCache = {};
     E.vol20 = {};
     for (const t in E.ret) {
       const r = E.ret[t], v = new Array(n).fill(null);
@@ -86,6 +88,21 @@
     const start = rangeKey === "max" ? E.minIdx : Math.max(1, end - Number(rangeKey) + 1);
     return [Math.min(start, end), end];
   };
+  // S&P 500 move in sigmas, measured against its own volatility over the lookback window ending the day before.
+  function sigmaSeries() {
+    if (E.sigmaCache[rangeKey]) return E.sigmaCache[rangeKey];
+    const s = E.ret[DATA.sp500], out = new Array(E.n).fill(null);
+    for (let i = 2; i < E.n; i++) {
+      if (s[i] == null) continue;
+      const a = rangeKey === "max" ? 1 : Math.max(1, i - Number(rangeKey)), b = i;   // returns a..i-1
+      const c = E.spCnt[b] - E.spCnt[a];
+      if (c < 40) continue;
+      const sum = E.spSum[b] - E.spSum[a], sq = E.spSq[b] - E.spSq[a];
+      const v = (sq - (sum * sum) / c) / (c - 1);
+      if (v > 0) out[i] = s[i] / Math.sqrt(v);
+    }
+    return (E.sigmaCache[rangeKey] = out);
+  }
   const seg = (t, a, b) => E.ret[t].slice(Math.max(1, a), b + 1);
   const annVol = (t, a, b) => { const v = nn(seg(t, a, b)); return v.length >= 10 ? std(v) * Math.sqrt(TD) : null; };
   function pairs(t, u, a, b) {
@@ -288,23 +305,23 @@
     DATA.funds.forEach((f) => {
       const t = f.ticker, sb = f.stated_benchmark, si = benchFor(f.style), ev = E.ret[t][e];
       if (ev == null) return;                                // fund didn't exist yet / no price that day
-      const sd60 = std(nn(E.ret[t].slice(Math.max(1, e - 60), e)));
+      const ownWin = nn(E.ret[t].slice(rangeKey === "max" ? 1 : Math.max(1, e - Number(rangeKey)), e));
+      const sdOwn = ownWin.length >= 20 ? std(ownWin) : null;   // fund's own daily volatility over the lookback
       const bSpy = beta(t, SP, a, b);
       rows.push({
         manager: f.manager, ticker: t, style: f.style, stated_benchmark: sb,
         event_ret: ev, stated_bmk_ret: E.ret[sb][e], excess_stated: ev - E.ret[sb][e],
         style_index_ret: E.ret[si][e], excess_style: ev - E.ret[si][e], excess_spy: ev - spx,
-        sigma_own: sd60 ? ev / sd60 : null,
-        vol20_pre: annVol(t, e - 20, e - 1), vol_pre: annVol(t, a, b),
+        sigma_own: sdOwn ? ev / sdOwn : null,
+        vol_pre: annVol(t, a, b),
         beta_spy_pre: bSpy, beta_stated_pre: beta(t, sb, a, b), down_cap_pre: capture(t, sb, a, b, "down"),
         pred_ret: bSpy != null ? bSpy * spx : null, alpha_day: bSpy != null ? ev - bSpy * spx : null,
         since_event: e < E.last ? periodRet(t, e + 1, E.last) : null,
       });
     });
     addPeer(rows, "event_ret", true, "event");
-    const spPre = nn(E.ret[SP].slice(Math.max(1, e - TD), e));
     const market = {
-      spy_ret: spx, spy_sigma60: E.sigma[e], spy_sigma1y: std(spPre) ? spx / std(spPre) : null,
+      spy_ret: spx, spy_sigma: sigmaSeries()[e],
       r1g_ret: E.ret[DATA.style_index.Growth][e], r1v_ret: E.ret[DATA.style_index.Value][e],
     };
     const groups = ["Growth", "Value"].map((style) => {
@@ -323,7 +340,7 @@
   function renderTiles(ev) {
     const m = ev.market, g = ev.groups.find((x) => x.style === "Growth"), v = ev.groups.find((x) => x.style === "Value");
     const tiles = [
-      ["S&P 500 Index (TR)", pct(m.spy_ret), `${num(m.spy_sigma60, 1)}σ vs prior 60d · ${num(m.spy_sigma1y, 1)}σ vs 1y`],
+      ["S&P 500 Index (TR)", pct(m.spy_ret), `${num(m.spy_sigma, 1)}σ vs its prior ${rangeLabel()} volatility`],
       ["Russell 1000 Growth (TR)", pct(m.r1g_ret), "Growth style index"],
       ["Russell 1000 Value (TR)", pct(m.r1v_ret), "Value style index"],
       ["Growth peers (avg)", pct(g.event_ret), `${pct(g.excess_style, 2, true)} vs R1000 Growth`],
@@ -427,8 +444,7 @@
       { key: "excess_style", label: "vs style index", fmt: Ps, color: true },
       { key: "event_peer_rank", label: "Peer rank", render: rankCell, title: "Rank within this peer group only (1 = best)" },
       { key: "event_vs_peer", label: "vs peer median", fmt: Ps, color: true },
-      { key: "sigma_own", label: "Move in own σ", fmt: (v) => num(v, 1) + "σ", title: "Shock-day return ÷ the fund's own prior 60-day daily standard deviation" },
-      { key: "vol20_pre", label: "Pre vol 20d", fmt: (v) => pct(v, 1) },
+      { key: "sigma_own", label: `Move in own σ (${L})`, fmt: (v) => num(v, 1) + "σ", title: "Shock-day return ÷ the fund's own daily standard deviation over the lookback window before the shock" },
       { key: "vol_pre", label: `Pre vol (${L})`, fmt: (v) => pct(v, 1) },
       { key: "beta_spy_pre", label: `Beta vs S&P (${L})`, fmt: R },
       { key: "beta_stated_pre", label: `Beta vs stated (${L})`, fmt: R },
@@ -495,14 +511,15 @@
     if (!sigmaK) { panel.hidden = true; sigmaHits = []; return; }
     const [a, b] = win(E.last);
     sigmaHits = [];
-    for (let i = Math.max(a, E.minIdx); i <= b; i++) if (E.sigma[i] != null && Math.abs(E.sigma[i]) >= sigmaK) sigmaHits.push(i);
+    const sig = sigmaSeries();
+    for (let i = Math.max(a, E.minIdx); i <= b; i++) if (sig[i] != null && Math.abs(sig[i]) >= sigmaK) sigmaHits.push(i);
     sigmaHits.reverse();
     panel.hidden = false;
     document.getElementById("sigmaHead").innerHTML =
-      `<b>${sigmaHits.length}</b> day${sigmaHits.length === 1 ? "" : "s"} with an S&amp;P 500 move of ≥ ${sigmaK}σ (vs its prior 60-day volatility) in the ${rangeLabel()} window. Click one to analyze it.`;
+      `<b>${sigmaHits.length}</b> day${sigmaHits.length === 1 ? "" : "s"} with an S&amp;P 500 move of ≥ ${sigmaK}σ (vs its own volatility over the prior ${rangeLabel()}) in the ${rangeLabel()} window. Click one to analyze it.`;
     const shown = sigmaHits.slice(0, 200);
     document.getElementById("sigmaList").innerHTML = shown.map((i) => {
-      const s = E.sigma[i], r = E.ret[DATA.sp500][i];
+      const s = sig[i], r = E.ret[DATA.sp500][i];
       return `<button type="button" class="sigma-chip ${i === eventIdx ? "active" : ""} ${s < 0 ? "down" : "up"}" data-i="${i}">
         <span class="d">${fmtDate(E.dates[i])}</span><span class="s">${num(s, 1, true)}σ · ${pct(r, 2, true)}</span></button>`;
     }).join("") + (sigmaHits.length > shown.length ? `<span class="hint">Showing the 200 most recent. Raise the sigma level or shorten the window to narrow it.</span>` : "");
@@ -514,7 +531,7 @@
     const li = lastIdx(t);
     return {
       manager: name, ticker: t, style, stated_benchmark: sb || "", pricing_basis: basis, last_date: E.dates[li],
-      ret_1d: E.ret[t][li], ret_range: periodRet(t, a, b), vol_range: annVol(t, a, b), vol20: annVol(t, li - 19, li),
+      ret_1d: E.ret[t][li], ret_range: periodRet(t, a, b), vol_range: annVol(t, a, b),
       beta_spy: beta(t, DATA.sp500, a, b), beta_stated: sb ? beta(t, sb, a, b) : null, corr_stated: sb ? corr(t, sb, a, b) : null,
       te_stated: sb ? te(t, sb, a, b) : null, up_cap: sb ? capture(t, sb, a, b, "up") : null, down_cap: sb ? capture(t, sb, a, b, "down") : null,
       max_dd: maxDD(t, a, b), obs: countObs(t, a, b),
@@ -537,7 +554,6 @@
       { key: "ret_peer_rank", label: "Return peer rank", render: rankCell },
       { key: "vol_range", label: `Vol (${L})`, fmt: (v) => pct(v, 1) },
       { key: "vol_peer_rank", label: "Vol peer rank", render: rankCell, title: "1 = lowest volatility in this peer group" },
-      { key: "vol20", label: "Vol 20d", fmt: (v) => pct(v, 1) },
       { key: "beta_spy", label: "Beta vs S&P 500", fmt: R },
       { key: "beta_stated", label: "Beta vs stated bmk", fmt: R },
       { key: "corr_stated", label: "Corr vs stated bmk", fmt: R },
@@ -551,7 +567,7 @@
       const med = (k) => median(rs.map((r) => r[k]));
       const si = benchFor(style);
       const footer = [
-        { manager: `${style} peer median`, ...Object.fromEntries(["ret_1d", "ret_range", "vol_range", "vol20", "beta_spy", "max_dd"].map((k) => [k, med(k)])) },
+        { manager: `${style} peer median`, ...Object.fromEntries(["ret_1d", "ret_range", "vol_range", "beta_spy", "max_dd"].map((k) => [k, med(k)])) },
         riskRow(idxName(si), si, "Benchmark", null, "Index level (close)", a, b),
         riskRow(idxName(DATA.sp500), DATA.sp500, "Benchmark", null, "Index level (close)", a, b),
       ];
