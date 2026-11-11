@@ -2,7 +2,7 @@
 
 Tracks daily volatility, beta and shock-day behavior for eight large cap SMA managers (four growth and four value). The SMAs have no public daily data, so each one is tracked through its public mutual fund or ETF proxy.
 
-**Private.** The dashboard runs only on your PC (http://localhost:8765). Eikon data and your app key never leave the machine and are never committed.
+**Private.** The dashboard runs only on your PC (http://localhost:8765/External-Manager/). Eikon data and your app key never leave the machine and are never committed.
 
 ## Managers and proxies
 
@@ -43,7 +43,7 @@ Prices are total-return adjusted and come from Yahoo Finance. When Eikon is conn
 
 ## Daily use
 
-With Eikon open, double-click **`run_tracker.bat`**. It pulls Yahoo prices and Eikon holdings and NAVs, rebuilds the data and the Excel workbook, and opens the dashboard at http://localhost:8765. Close the server window when you're done. To look again without refreshing, use `open_dashboard.bat`.
+With Eikon open, double-click **`run_tracker.bat`**. It pulls Yahoo prices and Eikon holdings and NAVs, rebuilds the data and the Excel workbook, and opens the dashboard at http://localhost:8765/External-Manager/. Close the server window when you're done. To look again without refreshing, use `open_dashboard.bat`.
 
 - Run it in the evening (after NAVs post, about 8pm ET) or the next morning.
 - If Eikon isn't open, everything except holdings still updates.
