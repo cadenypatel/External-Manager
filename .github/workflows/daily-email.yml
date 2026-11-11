@@ -1,0 +1,51 @@
+name: Daily email report (8:31 CT)
+
+# Emails an overview of the PUBLIC dashboard every morning at 8:31 Central Time.
+# Data: Yahoo Finance only (never Eikon). Mail settings come from repository secrets:
+#   SMTP_USER      Gmail address that sends the report
+#   SMTP_PASSWORD  Gmail app password for that account
+#   MAIL_TO        recipient address(es), comma-separated
+# GitHub cron is UTC with no daylight saving, so both 13:00 and 14:00 UTC are scheduled and
+# tracker/wait_until.py keeps only the right one and waits until 8:31 CT.
+
+on:
+  schedule:
+    - cron: "0 13 * * *"
+    - cron: "0 14 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: daily-email
+  cancel-in-progress: false
+
+jobs:
+  email:
+    runs-on: ubuntu-latest
+    timeout-minutes: 75
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Wait until 8:31 CT
+        id: gate
+        env:
+          TRIGGER_SCHEDULE: ${{ github.event.schedule }}
+        run: python tracker/wait_until.py
+
+      - name: Install dependencies
+        if: steps.gate.outputs.send == 'true'
+        run: pip install "yfinance>=0.2.66" "pandas>=2.2" "numpy>=1.26" "openpyxl>=3.1"
+
+      - name: Build and send report
+        if: steps.gate.outputs.send == 'true'
+        env:
+          SMTP_USER: ${{ secrets.SMTP_USER }}
+          SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
+          MAIL_TO: ${{ secrets.MAIL_TO }}
+        run: python tracker/daily_report.py --send

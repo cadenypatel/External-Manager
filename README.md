@@ -74,3 +74,15 @@ Edit the `FUNDS` and `EVENTS` lists at the top of [`tracker/manager_vol_tracker.
 - Fund holdings are the public fund's positions, not your SMA account's. SMA trades differ in timing, size and client-specific restrictions.
 
 For internal research and monitoring. Not investment advice.
+
+## Daily email report
+
+`.github/workflows/daily-email.yml` emails an overview of the public dashboard every morning at 8:31 Central Time: a market snapshot, notable S&P 500 days, growth and value peer tables, and the latest shock day. It uses Yahoo data only, never Eikon. It needs three repository secrets (Settings → Secrets and variables → Actions):
+
+| Secret | Value |
+|---|---|
+| `SMTP_USER` | The Gmail address that sends the report |
+| `SMTP_PASSWORD` | A Gmail **app password** for that account (Google Account → Security → 2-Step Verification → App passwords) |
+| `MAIL_TO` | Recipient address(es), comma-separated |
+
+To test it immediately, go to **Actions → Daily email report → Run workflow**. To preview locally without sending, run `python tracker/daily_report.py --out report.html`.

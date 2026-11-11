@@ -12,3 +12,4 @@ private_data/
 
 # local tooling
 .claude/
+site/report_preview.html
