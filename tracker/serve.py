@@ -37,7 +37,24 @@ ALLOWED_ORIGINS = {
     f"http://localhost:{PORT}",               # the private dashboard
     f"http://127.0.0.1:{PORT}",
 }
-_eikon_lock = threading.Lock()                 # one Eikon pull at a time
+_job_lock = threading.Lock()
+_job = {"state": "idle", "progress": "", "result": None, "error": None}   # one Eikon pull at a time
+
+
+def _run_pull(app_key):
+    def progress(msg):
+        _job["progress"] = msg
+    try:
+        import lseg_source
+        from manager_vol_tracker import FUNDS, _clean
+        res = lseg_source.pull(FUNDS, start=None, app_key=app_key, progress=progress)
+        _job["result"] = _clean({"status": res["status"], "holdings": res["holdings"], "errors": res.get("errors", [])[:20]})
+        _job["state"] = "done"
+    except Exception as e:
+        _job["error"] = f"Eikon pull failed: {e}"
+        _job["state"] = "error"
+    finally:
+        app_key = None                                 # key is only held for the duration of the pull
 
 
 class Handler(http.server.SimpleHTTPRequestHandler):
@@ -99,18 +116,12 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         except Exception:
             return self._json(400, {"error": "bad request"})
         app_key = (req.get("app_key") or "").strip() or None
-        if not _eikon_lock.acquire(timeout=1):
-            return self._json(429, {"error": "An Eikon pull is already running - try again in a moment."})
-        try:
-            import lseg_source
-            from manager_vol_tracker import FUNDS, _clean
-            res = lseg_source.pull(FUNDS, start=None, app_key=app_key)
-            return self._json(200, _clean({"status": res["status"], "holdings": res["holdings"],
-                                           "errors": res.get("errors", [])[:20]}))
-        except Exception as e:
-            return self._json(500, {"error": f"Eikon pull failed: {e}"})
-        finally:
-            _eikon_lock.release()
+        with _job_lock:
+            if _job["state"] == "running":
+                return self._json(202, {"state": "running", "progress": _job["progress"]})   # join the running pull
+            _job.update(state="running", progress="Connecting to Eikon…", result=None, error=None)
+            threading.Thread(target=_run_pull, args=(app_key,), daemon=True).start()
+        return self._json(202, {"state": "running", "progress": _job["progress"]})
 
     # ---------- static dashboard ----------
     def do_GET(self):
@@ -118,7 +129,16 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         if path == "/api/eikon/ping":
             if not self._origin_ok():
                 return self._json(403, {"error": "origin not allowed"})
-            return self._json(200, {"ok": True, "helper": "equity-manager-tracker", "version": 1})
+            return self._json(200, {"ok": True, "helper": "equity-manager-tracker", "version": 2})
+        if path == "/api/eikon/status":
+            if not self._origin_ok():
+                return self._json(403, {"error": "origin not allowed"})
+            out = {"state": _job["state"], "progress": _job["progress"]}
+            if _job["state"] == "done":
+                out["result"] = _job["result"]
+            elif _job["state"] == "error":
+                out["error"] = _job["error"]
+            return self._json(200, out)
         if path in ("/", PREFIX):
             return self._redirect(PREFIX + "/")
         if not path.startswith(PREFIX + "/"):

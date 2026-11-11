@@ -646,12 +646,22 @@
         if (!quiet) setMsg("Can't reach the helper on this PC. Double-click start_eikon_helper.bat, keep Eikon open, then try again. If your browser asks to allow access to local devices, click Allow.", "bad");
         return;
       }
-      setMsg("Connected. Pulling holdings from Eikon (the first run checks the last 8 trading days and can take a few minutes)…");
-      const r = await fetchTimeout(HELPER + "/api/eikon/holdings", {
+      // Start the pull on the helper, then poll its progress (a first run checks past dates and can take minutes).
+      const start = await fetchTimeout(HELPER + "/api/eikon/holdings", {
         method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ app_key: key }),
-      }, 600000);
-      const res = await r.json();
-      if (!r.ok) { setMsg(res.error || "Eikon pull failed.", "bad"); return; }
+      }, 15000);
+      if (!start.ok && start.status !== 202) { const j = await start.json().catch(() => ({})); setMsg(j.error || "Eikon pull failed to start.", "bad"); return; }
+      let res = null;
+      const t0 = Date.now();
+      while (Date.now() - t0 < 30 * 60 * 1000) {
+        await new Promise((ok) => setTimeout(ok, 2000));
+        const s = await (await fetchTimeout(HELPER + "/api/eikon/status", {}, 10000)).json();
+        if (s.state === "done") { res = s.result; break; }
+        if (s.state === "error") { setMsg(s.error || "Eikon pull failed.", "bad"); return; }
+        const secs = Math.round((Date.now() - t0) / 1000);
+        setMsg(`Pulling from Eikon (${secs}s): ${s.progress || "working"}…`);
+      }
+      if (!res) { setMsg("Eikon pull is still running after 30 minutes. Check the helper window.", "bad"); return; }
       DATA.eikon = res;
       renderHoldings();
       const n = Object.keys(res.holdings || {}).length, errs = (res.errors || []).slice(0, 4).join(" · ");

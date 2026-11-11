@@ -192,7 +192,14 @@ def get_holdings(ld, code, cfg, fields=None, sdate=None):
     params = dict(HOLDINGS_PARAMS)
     if sdate:
         params["SDate"] = sdate
-    df = ld.get_data(code, list(use.values()), parameters=params)
+    try:
+        df = ld.get_data(code, list(use.values()), parameters=params)
+    except Exception:
+        if "holding_date" not in use:
+            raise
+        # Some funds' Lipper records reject the date field - retry without it.
+        use.pop("holding_date")
+        df = ld.get_data(code, list(use.values()), parameters=params)
     if df is None or df.empty:
         return pd.DataFrame()
     df = df.drop(columns=[c for c in df.columns if c.lower() == "instrument"], errors="ignore")
@@ -232,10 +239,15 @@ def snapshot_key(df, fallback=None):
     return fallback or pd.Timestamp.today().strftime("%Y-%m-%d")
 
 
-def backfill_dates(days=8):
-    """Recent trading days to request (oldest first) - the test for whether Eikon has daily holdings."""
-    end = pd.Timestamp.today().normalize() - pd.offsets.BDay(1)
-    return [d.strftime("%Y-%m-%d") for d in pd.bdate_range(end=end, periods=days)]
+def backfill_dates(vehicle, days=8, months=3):
+    """Past dates to request, oldest first. ETFs: recent trading days (tests for daily holdings).
+    Mutual funds: recent month-ends (their reports are monthly at best)."""
+    today = pd.Timestamp.today().normalize()
+    if vehicle == "ETF":
+        ds = pd.bdate_range(end=today - pd.offsets.BDay(1), periods=days)
+    else:
+        ds = pd.date_range(end=today - pd.Timedelta(days=1), periods=months, freq="BME")
+    return [d.strftime("%Y-%m-%d") for d in ds]
 
 
 def _fingerprint(df):
@@ -256,6 +268,13 @@ def save_snapshot(ticker, df, fallback_key=None):
     earlier = [p for p in sorted(d.glob("*.csv")) if p.stem < key]
     later = [p for p in sorted(d.glob("*.csv")) if p.stem > key]
     fp = _fingerprint(df)
+    same = d / f"{key}.csv"
+    if same.exists():
+        try:
+            if _fingerprint(pd.read_csv(same)) == fp:
+                return key, False
+        except Exception:
+            pass
     for neighbour in ([earlier[-1]] if earlier else []) + ([later[0]] if later else []):
         try:
             if _fingerprint(pd.read_csv(neighbour)) == fp:
@@ -282,8 +301,17 @@ def diff_holdings(prev, cur):
     share change by more than 2 percentage points. Weight change is shown too.
     """
     key = "ric" if "ric" in cur and cur["ric"].notna().any() and "ric" in prev else "name"
-    p = prev.set_index(prev[key].astype(str))
-    c = cur.set_index(cur[key].astype(str))
+
+    def combine(df):
+        # One row per security: some reports list a security twice (share classes, lots) or lack a RIC.
+        df = df.copy()
+        df["_k"] = df[key].where(df[key].notna() & (df[key].astype(str).str.strip() != ""), df["name"]).astype(str)
+        agg = {"name": "first", "weight": "sum"}
+        if "shares" in df:
+            agg["shares"] = lambda s: s.sum(min_count=1)
+        return df.groupby("_k", sort=False).agg(agg)
+
+    p, c = combine(prev), combine(cur)
     rows = []
     both = p.index.intersection(c.index)
     flow = None
@@ -317,9 +345,11 @@ def diff_holdings(prev, cur):
     return out, flow
 
 
-def pull(fund_list, start=None, app_key=None):
+def pull(fund_list, start=None, app_key=None, progress=None):
     """Returns {'holdings': {...}, 'nav': {ticker: Series}, 'status': str}.
-    start=None skips the ETF NAV history (holdings only). app_key overrides the config file."""
+    start=None skips the ETF NAV history (holdings only). app_key overrides the config file.
+    progress: optional callback(str) for live status."""
+    progress = progress or (lambda msg: None)
     try:
         cfg = load_config(app_key)
     except LsegUnavailable as e:
@@ -355,8 +385,9 @@ def pull(fund_list, start=None, app_key=None):
                 err("Eikon returned no holdings for any candidate field. Your subscription may not include "
                     "Lipper fund holdings - run check_eikon.bat and send the report.")
 
-        for f in fund_list:
+        for i_f, f in enumerate(fund_list, 1):
             t = f["ticker"]
+            progress(f"{t}: loading latest holdings ({i_f}/{len(fund_list)})")
             tried = []
             h, code_used = pd.DataFrame(), None
             for cand in [t] + f.get("holdings_alt", []):     # fall back to sibling share classes
@@ -379,23 +410,27 @@ def pull(fund_list, start=None, app_key=None):
                 err(f"{t}: Eikon returned no holdings - tried {', '.join(tried)}")
                 continue
 
-            # Daily-history test / backfill: ask Eikon for holdings as of each recent trading day.
-            # Identical reports are de-duplicated, so only genuinely different days are kept.
-            new_days = []
+            # History: ETFs - each of the last 8 trading days (daily-holdings test);
+            # mutual funds - the last 3 month-ends. Identical reports are de-duplicated.
+            new_days, distinct = [], set()
             if len(load_snapshots(t)) < 4:
-                for day in backfill_dates():
+                days = backfill_dates(f["vehicle"])
+                for n_day, day in enumerate(days, 1):
+                    progress(f"{t}: checking holdings as of {day} ({n_day}/{len(days)})")
                     try:
                         hd = get_holdings(ld, code_used, cfg, sdate=day)
                     except Exception:
                         continue
                     if not hd.empty:
+                        distinct.add(_fingerprint(hd))
                         k, saved = save_snapshot(t, hd, fallback_key=day)
-                        if saved:
+                        if saved and k not in new_days:
                             new_days.append(k)
+            distinct.add(_fingerprint(h))
             key, saved = save_snapshot(t, h)
             dates = [d for d, _ in load_snapshots(t)]
             print(f"  {t}: {len(h)} holdings, latest report {key}" + ("" if saved else " (unchanged)")
-                  + f" | distinct reports on file: {len(dates)}" + (f" | new from history: {new_days}" if new_days else ""))
+                  + f" | distinct holdings sets seen this run: {len(distinct)} | reports on file: {dates}")
             if f["vehicle"] == "ETF" and start is not None:
                 try:
                     s = get_nav_history(ld, code_used, cfg, start)
