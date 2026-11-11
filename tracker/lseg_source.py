@@ -346,6 +346,22 @@ def diff_holdings(prev, cur):
     return out, flow
 
 
+def nport_fill(t, f, err=print):
+    """Save a fund's quarterly SEC N-PORT holdings reports as snapshots. Returns True if any exist."""
+    try:
+        import nport_source
+        reports = nport_source.get_reports(f["nport_series"], max_reports=3)
+    except Exception as e:
+        err(f"{t}: SEC N-PORT lookup failed: {e}")
+        return False
+    for rep, df in reports:
+        df = df.assign(source="SEC N-PORT")
+        save_snapshot(t, df[["name", "ric", "weight", "shares", "date", "source"]], fallback_key=rep)
+    dates = [d for d, _ in load_snapshots(t)]
+    print(f"  {t}: quarterly holdings from SEC N-PORT | reports on file: {dates}")
+    return bool(dates)
+
+
 def pull(fund_list, start=None, app_key=None, progress=None):
     """Returns {'holdings': {...}, 'nav': {ticker: Series}, 'status': str}.
     start=None skips the ETF NAV history (holdings only). app_key overrides the config file.
@@ -408,6 +424,10 @@ def pull(fund_list, start=None, app_key=None, progress=None):
                     break
                 tried.append(f"{cand} (empty)")
             if h.empty:
+                if f.get("nport_series"):
+                    progress(f"{t}: not in Eikon - loading quarterly holdings from SEC N-PORT filings")
+                    if nport_fill(t, f, err):
+                        continue
                 err(f"{t}: Eikon returned no holdings - tried {', '.join(tried)}")
                 continue
 
@@ -451,7 +471,8 @@ def pull(fund_list, start=None, app_key=None, progress=None):
         if not snaps:
             continue
         latest_date, latest = snaps[-1]
-        entry = {"as_of": latest_date, "snapshots": [d for d, _ in snaps],
+        src = "SEC N-PORT (quarterly)" if "source" in latest and (latest["source"] == "SEC N-PORT").any() else "Eikon / Lipper"
+        entry = {"as_of": latest_date, "snapshots": [d for d, _ in snaps], "source": src,
                  "holdings": latest.sort_values("weight", ascending=False)[["name", "weight"]].to_dict("records"),
                  "top": latest.sort_values("weight", ascending=False).head(15)[["name", "weight"]].to_dict("records"),
                  "n_holdings": int(len(latest)), "changes": None}

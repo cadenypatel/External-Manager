@@ -738,7 +738,7 @@
     return `<div class="card holdings-card ${flagged.length ? "flagged" : ""}">
       <div class="hc-head"><strong>${esc(f.manager)}</strong>
         ${flagged.length ? `<span class="flag-badge">${flagged.length} notable change${flagged.length > 1 ? "s" : ""}</span>` : (c ? `<span class="calm-badge">No notable changes</span>` : "")}</div>
-      <div class="hint hc-sub">${f.ticker} · ${h.n_holdings} holdings · ${header}</div>
+      <div class="hint hc-sub">${f.ticker} · ${h.n_holdings} holdings · ${header}${h.source ? ` · Source: ${esc(h.source)}` : ""}</div>
       ${primary ? `<div class="hc-primary">Biggest change: <b>${esc(primary.name)}</b>, ${esc(flagText(primary))}${primary.flag === "Sold out" ? ` (was ${W(primary.weight_prev)})` : primary.flag === "New position" ? ` at ${W(primary.weight_now)}` : ""}</div>` : ""}
       <div class="table-scroll hc-table"><table class="data"><thead><tr>
         <th class="txt">Security</th><th>Weight</th><th>${changeLabel}</th><th>Shares chg</th><th class="txt">Flag</th></tr></thead><tbody>` +
