@@ -1,8 +1,12 @@
 @echo off
-REM Refreshes the data locally: writes site\data\data.json and site\Manager_Vol_Tracker.xlsx.
-REM Close the workbook in Excel first, or the save will fail.
-REM Optional: run_tracker.bat --event 2026-11-05   (shock day the Excel sheet focuses on)
+REM Refreshes all data (Yahoo prices + Eikon holdings/NAVs if Eikon is open) and opens the private dashboard.
+REM Close the Excel workbook first, or the save will fail.
 cd /d "%~dp0"
 python tracker\manager_vol_tracker.py %*
-if %errorlevel%==0 start "" "site\Manager_Vol_Tracker.xlsx"
-pause
+if errorlevel 1 (
+  echo.
+  echo Data refresh failed - see messages above.
+  pause
+  exit /b 1
+)
+call "%~dp0open_dashboard.bat"

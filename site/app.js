@@ -410,6 +410,48 @@
     ], DATA.funds);
   }
 
+  // ---------- holdings & trades (Eikon) ----------
+  function renderHoldings() {
+    const body = document.getElementById("holdingsBody");
+    const status = document.getElementById("eikonStatus");
+    const ek = DATA.eikon || { status: "not run", holdings: {} };
+    const H = ek.holdings || {};
+    const have = Object.keys(H).length;
+    status.textContent = ek.status === "ok" ? `Eikon connected · ${have} of ${DATA.funds.length} managers` : "Eikon not connected";
+    if (!have) {
+      body.innerHTML = `<div class="card prose"><p><b>No holdings data yet.</b> ${esc(ek.status || "")}</p>
+        <p>To turn this on: open Eikon, put your app key in <code>config/lseg.local.json</code>, run <code>check_eikon.bat</code> once, then <code>run_tracker.bat</code>. Trades appear from the second holdings report onward.</p></div>`;
+      return;
+    }
+    const W = (v) => (v == null ? "–" : num(v, 2) + "%");
+    const Wd = (v) => (v == null ? "–" : num(v, 2, true) + " pp");
+    let html = "";
+    ["Growth", "Value"].forEach((style) => {
+      html += `<h3 class="peer-h"><span class="dot ${style}"></span> ${style} peer group</h3><div class="grid-2">`;
+      fundsBy(style).forEach((f) => {
+        const h = H[f.ticker];
+        if (!h) {
+          html += `<div class="card"><strong>${esc(f.manager)}</strong><p class="hint">No Eikon holdings returned for ${f.ticker}.</p></div>`;
+          return;
+        }
+        const c = h.changes;
+        const counts = c ? ["New position", "Added", "Trimmed", "Sold out"].map((k) => `<span class="chip">${k}: ${c.counts[k] || 0}</span>`).join("") : "";
+        const rows = c ? c.rows.slice(0, 25) : [];
+        html += `<div class="card holdings-card">
+          <div class="table-title" style="padding:0 0 6px"><strong>${esc(f.manager)}</strong><span>${f.ticker} · ${h.n_holdings} holdings · as of ${fmtDate(h.as_of)}</span></div>
+          ${c ? `<div class="hint" style="margin:0 0 8px">Changes ${fmtDate(c.from)} → ${fmtDate(c.to)}${c.fund_flow_share_change != null ? ` · fund-wide share change ${pct(c.fund_flow_share_change, 1, true)}` : ""}</div><div class="chips">${counts}</div>` :
+            `<div class="hint" style="margin:0 0 8px">Only one holdings report saved so far (${h.snapshots.join(", ")}). Trades appear after the next report.</div>`}
+          ${rows.length ? `<div class="table-scroll"><table class="data"><thead><tr><th class="txt">Security</th><th class="txt">Action</th><th>Weight before</th><th>Weight now</th><th>Change</th><th>Shares chg</th></tr></thead><tbody>` +
+            rows.map((r) => `<tr><td class="txt">${esc(r.name)}</td><td class="txt">${esc(r.action)}</td><td>${W(r.weight_prev)}</td><td>${W(r.weight_now)}</td><td class="${r.weight_change < 0 ? "neg" : "pos"}">${Wd(r.weight_change)}</td><td>${r.share_change == null ? "–" : pct(r.share_change, 1, true)}</td></tr>`).join("") +
+            `</tbody></table></div>` : ""}
+          <details><summary>Top holdings</summary><table class="data"><tbody>${h.top.slice(0, 10).map((t) => `<tr><td class="txt">${esc(t.name)}</td><td>${W(t.weight)}</td></tr>`).join("")}</tbody></table></details>
+        </div>`;
+      });
+      html += "</div>";
+    });
+    body.innerHTML = html;
+  }
+
   // ---------- time series ----------
   function sliceIdx() {
     const n = DATA.series.dates.length;
@@ -480,6 +522,7 @@
     applyDefaults(theme());
     renderShock();
     renderRisk();
+    renderHoldings();
     renderTimeSeries();
   }
 

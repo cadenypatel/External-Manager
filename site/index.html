@@ -25,6 +25,7 @@
       <a href="#risk">Current risk</a>
       <a href="#vol">Volatility over time</a>
       <a href="#perf">Performance</a>
+      <a href="#holdings">Holdings &amp; trades</a>
       <a href="#method">Methodology</a>
     </nav>
   </header>
@@ -128,6 +129,13 @@
           <div class="chart-box tall"><canvas id="perfValue"></canvas></div>
         </figure>
       </div>
+    </section>
+
+    <!-- HOLDINGS -->
+    <section id="holdings">
+      <div class="section-head"><h2>Holdings &amp; trades</h2><span id="eikonStatus" class="pill"></span></div>
+      <p class="hint">From Refinitiv Eikon (Lipper holdings). Trades are worked out by comparing each manager's two most recent holdings reports. Share changes are net of fund-wide flows: a position counts as added or trimmed only if it moved more than 2 percentage points beyond the fund's overall share change. These are the public fund's trades, not your SMA account's.</p>
+      <div id="holdingsBody"></div>
     </section>
 
     <!-- METHOD -->

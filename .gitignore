@@ -5,3 +5,7 @@ site/*.xlsx
 __pycache__/
 *.pyc
 .venv/
+
+# Eikon / LSEG: your key and licensed data never leave this PC
+config/lseg.local.json
+private_data/

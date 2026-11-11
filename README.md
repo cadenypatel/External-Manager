@@ -2,7 +2,7 @@
 
 Tracks daily volatility, beta and shock-day behavior for eight large cap SMA managers (four growth and four value). The SMAs have no public daily data, so each one is tracked through its public mutual fund or ETF proxy.
 
-**Live dashboard:** https://cadenypatel.github.io/External-Manager/
+**Private.** The dashboard runs only on your PC (http://localhost:8765). Eikon data and your app key never leave the machine and are never committed.
 
 ## Managers and proxies
 
@@ -30,26 +30,29 @@ Tracks daily volatility, beta and shock-day behavior for eight large cap SMA man
 - **Shock days:** the dates listed in `EVENTS`, plus any day in the last year when the S&P 500 moved at least 3σ against its prior 60-day volatility. These are added automatically.
 - **Current risk:** 20-day, 60-day and 1-year volatility, beta, correlation, tracking error, up and down capture, maximum drawdown and returns.
 - **Time series:** 20-day rolling volatility and cumulative total return, with shock days marked.
+- **Holdings & trades (Eikon):** Lipper holdings for each fund, saved as dated snapshots; positions added, trimmed, opened or sold out between reports, net of fund-wide flows.
 
-Prices are total-return adjusted, with distributions reinvested, and come from Yahoo Finance.
+Prices are total-return adjusted and come from Yahoo Finance. When Eikon is connected, the two ETFs (GSGO, PVAL) switch to official daily NAVs, with distributions added back.
 
-## How it updates
+## Setup (one time)
 
-The GitHub Actions workflow [`.github/workflows/update-site.yml`](.github/workflows/update-site.yml) runs on weekday evenings at 8:30pm ET and again the next morning to catch late NAVs. It pulls fresh prices, rebuilds `site/data/data.json` and the Excel workbook, and deploys the site to GitHub Pages. To refresh by hand, open **Actions → Refresh data and deploy site → Run workflow**.
+1. **Install:** `pip install -r requirements.txt`
+2. **Get an Eikon app key:** open Eikon, type `APPKEY` in the search bar, and open the **App Key Generator**. Register a new app (any name, e.g. "Equity Manager Tracker"), tick **Eikon Data API**, and copy the key.
+3. **Paste the key** into `config/lseg.local.json` in place of `PASTE-YOUR-EIKON-APP-KEY-HERE`. Copy `config/lseg.example.json` to that name if it doesn't exist. Git ignores this file, so the key is never pushed.
+4. **Check the connection:** with Eikon open and logged in, double-click `check_eikon.bat`. It finds each fund in Eikon, tests which holdings and NAV fields your subscription returns, and saves the working ones. A full report goes to `private_data/lseg_check_report.txt`.
 
-## Run it locally
+## Daily use
 
-```bash
-pip install -r requirements.txt
-python tracker/manager_vol_tracker.py
-python -m http.server 8000 --directory site   # then open http://localhost:8000
-```
+With Eikon open, double-click **`run_tracker.bat`**. It pulls Yahoo prices and Eikon holdings and NAVs, rebuilds the data and the Excel workbook, and opens the dashboard at http://localhost:8765. Close the server window when you're done. To look again without refreshing, use `open_dashboard.bat`.
 
-On Windows you can also double-click `run_tracker.bat`, which refreshes the data and opens the Excel workbook.
+- Run it in the evening (after NAVs post, about 8pm ET) or the next morning.
+- If Eikon isn't open, everything except holdings still updates.
+- Holdings snapshots build up in `private_data/holdings/<ticker>/<date>.csv`. Trades appear once a fund has two reports.
+- To run it automatically, use Windows Task Scheduler to run `run_tracker.bat` on weekday evenings while Eikon is logged in.
 
 ## Changing the managers or shock days
 
-Edit the `FUNDS` and `EVENTS` lists at the top of [`tracker/manager_vol_tracker.py`](tracker/manager_vol_tracker.py) and push. The site rebuilds automatically.
+Edit the `FUNDS` and `EVENTS` lists at the top of [`tracker/manager_vol_tracker.py`](tracker/manager_vol_tracker.py), then run `run_tracker.bat`. If Eikon can't find a fund, add its Lipper ID under `"ids"` in `config/lseg.local.json`, e.g. `"ids": {"GSGO": {"lipper": "40012345"}}`.
 
 ## Caveats
 
@@ -57,5 +60,7 @@ Edit the `FUNDS` and `EVENTS` lists at the top of [`tracker/manager_vol_tracker.
 - Public funds stand in for the SMAs. Actual accounts can differ because of cash, fees, client restrictions and tax-loss harvesting.
 - GSGO's price history starts on Nov 17, 2025, when the fund converted from a mutual fund to an ETF.
 - With only eight managers, correlations across them show direction only, not statistical proof.
+- Eikon/Lipper data is licensed: keep it on this PC and don't publish the dashboard or the Excel workbook outside your firm.
+- Fund holdings are the public fund's positions, not your SMA account's. SMA trades differ in timing, size and client-specific restrictions.
 
 For internal research and monitoring. Not investment advice.

@@ -30,6 +30,8 @@ import math
 import sys
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
 import numpy as np
 import pandas as pd
 import yfinance as yf
@@ -97,8 +99,43 @@ def all_tickers():
     return fund_tickers() + [R1G, R1V, SP500]
 
 
+ETF_NAV_FROM_EIKON = set()   # filled at run time when Eikon supplies ETF NAVs
+
+
 def pricing_basis(f):
-    return "Daily NAV (4pm ET)" if f["vehicle"] == "Mutual fund" else "Daily closing price (4pm ET)"
+    if f["vehicle"] == "Mutual fund":
+        return "Daily NAV (4pm ET)"
+    return "Daily NAV (4pm ET, Eikon)" if f["ticker"] in ETF_NAV_FROM_EIKON else "Daily closing price (4pm ET)"
+
+
+def nav_total_return_index(nav, ticker):
+    """Turn an ETF NAV series into a total-return index: add back per-share
+    distributions on their ex-dates (amounts from Yahoo)."""
+    nav = nav.copy()
+    nav.index = pd.to_datetime(nav.index).tz_localize(None).normalize()
+    try:
+        div = yf.Ticker(ticker).dividends
+        div.index = pd.to_datetime(div.index).tz_localize(None).normalize()
+    except Exception:
+        div = pd.Series(dtype=float)
+    d = div.reindex(nav.index).fillna(0.0)
+    r = (nav + d) / nav.shift(1) - 1
+    return (1 + r.fillna(0)).cumprod()
+
+
+def apply_eikon_nav(px, navs):
+    for t, s in navs.items():
+        if t not in px.columns or len(s) < 20:
+            continue
+        idx = nav_total_return_index(s, t)
+        r_nav = idx.pct_change().reindex(px.index)
+        r_px = px[t].pct_change()
+        r = r_nav.where(r_nav.notna(), r_px)              # fall back to price where NAV is missing
+        first = px[t].first_valid_index()
+        rebuilt = (1 + r.loc[first:].fillna(0)).cumprod() * px.at[first, t]
+        px.loc[first:, t] = rebuilt
+        ETF_NAV_FROM_EIKON.add(t)
+    return px
 
 
 def fetch_prices(tickers, years):
@@ -570,13 +607,23 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--event", help="shock day the Excel workbook focuses on (YYYY-MM-DD); default = most recent")
     ap.add_argument("--site-dir", default=str(ROOT / "site"))
+    ap.add_argument("--no-eikon", action="store_true", help="skip the Eikon/LSEG pull")
     args = ap.parse_args()
 
     site = Path(args.site_dir)
     (site / "data").mkdir(parents=True, exist_ok=True)
 
-    print(f"Downloading {len(all_tickers())} series...")
+    print(f"Downloading {len(all_tickers())} price series (Yahoo)...")
     px = fetch_prices(all_tickers(), HISTORY_YEARS)
+
+    lseg = {"status": "skipped (--no-eikon)", "holdings": {}, "nav": {}}
+    if not args.no_eikon:
+        print("Pulling holdings and ETF NAVs from Eikon...")
+        import lseg_source
+        lseg = lseg_source.pull(FUNDS, px.index[0].date())
+        print(f"  Eikon: {lseg['status']}")
+        if lseg["nav"]:
+            px = apply_eikon_nav(px, lseg["nav"])
     rets = px.pct_change(fill_method=None)
     events = find_events(rets)
     if not events:
@@ -584,6 +631,7 @@ def main():
     cur_df, bench_df = current_risk(rets, px)
 
     data = build_json(px, rets, events, cur_df, bench_df)
+    data["eikon"] = _clean({"status": lseg["status"], "holdings": lseg["holdings"]})
     (site / "data" / "data.json").write_text(json.dumps(data, separators=(",", ":")), encoding="utf-8")
 
     focus = pd.Timestamp(args.event) if args.event else max(events)
