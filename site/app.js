@@ -674,7 +674,8 @@
         if (s.state === "done") { showEikonResult(s.result); return; }
         if (s.state === "error") { setMsg(s.error || "Eikon pull failed.", "bad"); return; }
         if (s.state === "idle") { setMsg(""); return; }
-        setMsg(`Pulling from Eikon (${Math.round((Date.now() - t0) / 1000)}s): ${s.progress || "working"}…`);
+        document.getElementById("eikonStatus").textContent = "Eikon loading…";
+        setMsg(`Pulling from Eikon (${Math.round((Date.now() - t0) / 1000)}s): ${s.progress || "working"}… The button unlocks when it finishes.`);
         await new Promise((ok) => setTimeout(ok, 2000));
       }
       setMsg("Eikon pull is still running after 30 minutes. Check the helper window.", "bad");
