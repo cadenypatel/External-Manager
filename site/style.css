@@ -158,3 +158,17 @@ table.data tr.footer:first-of-type td, table.data tbody tr.footer + tr:not(.foot
 .holdings-card summary { cursor: pointer; color: var(--ink-2); }
 .holdings-card .table-scroll { max-height: 360px; overflow: auto; }
 code { font-size: 12.5px; background: var(--surface-2); border: 1px solid var(--border); border-radius: 4px; padding: 1px 4px; }
+
+.eikon-connect { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-bottom: 14px; }
+.eikon-connect input[type=password] {
+  font: inherit; font-size: 14px; color: var(--ink); background: var(--surface);
+  border: 1px solid var(--axis); border-radius: 8px; padding: 6px 10px; flex: 1 1 260px; min-width: 0;
+}
+.eikon-connect button.btn { border: 0; cursor: pointer; font: inherit; font-size: 13px; font-weight: 600; }
+.eikon-connect button.btn:disabled { opacity: .5; cursor: wait; }
+.eikon-connect .remember { font-size: 13px; color: var(--ink-2); display: inline-flex; gap: 6px; align-items: center; }
+.eikon-connect .hint { flex-basis: 100%; margin: 0; font-size: 12.5px; }
+.eikon-msg { flex-basis: 100%; font-size: 13px; color: var(--ink-2); }
+.eikon-msg:empty { display: none; }
+.eikon-msg.good { color: var(--good); }
+.eikon-msg.bad { color: var(--bad); }

@@ -1,0 +1,56 @@
+name: Public site (Yahoo data only)
+
+# Builds the PUBLIC edition: free Yahoo Finance data only. It never touches Eikon,
+# and no Eikon data or key exists in this repo. The private Eikon edition runs on
+# your PC via run_tracker.bat.
+
+on:
+  schedule:
+    # Weekday evenings after mutual fund NAVs post (01:30 UTC = 8:30pm EST / 9:30pm EDT),
+    # and again the next morning to catch late NAVs.
+    - cron: "30 1 * * 2-6"
+    - cron: "0 12 * * 2-6"
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies (no Eikon library needed)
+        run: pip install "yfinance>=0.2.66" "pandas>=2.2" "numpy>=1.26" "openpyxl>=3.1"
+
+      - name: Build public edition
+        run: python tracker/manager_vol_tracker.py --public
+
+      - uses: actions/configure-pages@v5
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

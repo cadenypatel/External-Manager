@@ -2,7 +2,17 @@
 
 Tracks daily volatility, beta and shock-day behavior for eight large cap SMA managers (four growth and four value). The SMAs have no public daily data, so each one is tracked through its public mutual fund or ETF proxy.
 
-**Private.** The dashboard runs only on your PC (http://localhost:8765/External-Manager/). Eikon data and your app key never leave the machine and are never committed.
+## Two editions
+
+| | Public site | Private dashboard |
+|---|---|---|
+| Address | https://cadenypatel.github.io/External-Manager/ | http://localhost:8765/External-Manager/ (this PC only) |
+| Built by | GitHub Actions, weekday evenings and mornings | `run_tracker.bat` on your PC |
+| Data | Yahoo Finance only | Yahoo, plus Eikon holdings, trades and ETF NAVs |
+
+**Eikon on the public site:** the Holdings & trades section has an **Enter Eikon API** box. With Eikon open and `start_eikon_helper.bat` running, enter your app key and click **Load holdings**. The page asks the helper on *your own PC* (localhost) for the data and shows it in your browser only. The key and the Eikon data never go to GitHub or to anyone else's browser. "Remember on this computer" keeps the key in this browser's local storage only. Other visitors see an empty box that does nothing without their own Eikon and helper.
+
+Your Eikon key (`config/lseg.local.json`) and Eikon data (`private_data/`) are git-ignored and are never committed.
 
 ## Managers and proxies
 

@@ -48,11 +48,11 @@ class LsegUnavailable(Exception):
     pass
 
 
-def load_config():
+def load_config(app_key=None):
     cfg = {}
     if CONFIG_PATH.exists():
         cfg = json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
-    key = os.environ.get("LSEG_APP_KEY") or cfg.get("app_key", "")
+    key = (app_key or "").strip() or os.environ.get("LSEG_APP_KEY") or cfg.get("app_key", "")
     if not key or "PASTE" in key.upper():
         raise LsegUnavailable(f"No app key set. Put it in {CONFIG_PATH} (see README) or set LSEG_APP_KEY.")
     cfg["app_key"] = key
@@ -70,9 +70,17 @@ def open_session(cfg):
     except ImportError as e:
         raise LsegUnavailable("lseg-data is not installed: pip install lseg-data") from e
     try:
-        ld.open_session(app_key=cfg["app_key"])          # default = desktop session via Eikon on localhost
+        session = ld.open_session(app_key=cfg["app_key"])   # default = desktop session via Eikon on localhost
     except Exception as e:
         raise LsegUnavailable(f"Could not connect to Eikon. Is Eikon open and logged in? ({e})") from e
+    # The library logs failures instead of raising, so check the session actually opened.
+    if getattr(session, "open_state", None) != ld.OpenState.Opened:
+        try:
+            ld.close_session()
+        except Exception:
+            pass
+        raise LsegUnavailable("Eikon refused the connection. Check that Eikon is open and logged in "
+                              "and that the app key is correct (Eikon search bar: APPKEY).")
     return ld
 
 
@@ -220,12 +228,13 @@ def diff_holdings(prev, cur):
     return out, flow
 
 
-def pull(fund_list, start):
-    """Called by the main tracker. Returns {'holdings': {...}, 'nav': {ticker: Series}, 'status': str}."""
+def pull(fund_list, start=None, app_key=None):
+    """Returns {'holdings': {...}, 'nav': {ticker: Series}, 'status': str}.
+    start=None skips the ETF NAV history (holdings only). app_key overrides the config file."""
     try:
-        cfg = load_config()
+        cfg = load_config(app_key)
     except LsegUnavailable as e:
-        return {"status": f"LSEG not configured: {e}", "holdings": {}, "nav": {}}
+        return {"status": f"Eikon not configured: {e}", "holdings": {}, "nav": {}}
     try:
         ld = open_session(cfg)
     except LsegUnavailable as e:
@@ -247,7 +256,7 @@ def pull(fund_list, start):
                     print(f"  {t}: {len(h)} holdings as of {key}")
             except Exception as e:
                 print(f"  {t}: holdings failed: {e}", file=sys.stderr)
-            if f["vehicle"] == "ETF":
+            if f["vehicle"] == "ETF" and start is not None:
                 try:
                     s = get_nav_history(ld, code, cfg, start)
                     if len(s):

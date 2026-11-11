@@ -16,6 +16,7 @@
         <p class="sub">Volatility and shock-day behavior for 8 large cap growth and value managers</p>
       </div>
       <div class="header-meta">
+        <span id="edition" class="pill"></span>
         <span id="asof" class="pill">Loading…</span>
         <a class="btn" href="Manager_Vol_Tracker.xlsx" download>Download Excel</a>
       </div>
@@ -134,6 +135,15 @@
     <!-- HOLDINGS -->
     <section id="holdings">
       <div class="section-head"><h2>Holdings &amp; trades</h2><span id="eikonStatus" class="pill"></span></div>
+      <form class="card eikon-connect" id="eikonForm" autocomplete="off">
+        <label for="eikonKey"><strong>Enter Eikon API:</strong></label>
+        <input id="eikonKey" name="eikon-app-key" type="password" autocomplete="off" spellcheck="false"
+               placeholder="Your Eikon app key" aria-describedby="eikonHelp">
+        <button id="eikonConnect" type="submit" class="btn">Load holdings</button>
+        <label class="remember"><input type="checkbox" id="eikonRemember"> Remember on this computer</label>
+        <span id="eikonMsg" class="eikon-msg" role="status"></span>
+        <p id="eikonHelp" class="hint">Needs Eikon open and <code>start_eikon_helper.bat</code> running on your PC. Your key is sent only to that helper on your own computer (localhost), never to this website or GitHub. Holdings load into your browser only, so no one else sees them.</p>
+      </form>
       <p class="hint">From Refinitiv Eikon (Lipper holdings). Trades are worked out by comparing each manager's two most recent holdings reports. Share changes are net of fund-wide flows: a position counts as added or trimmed only if it moved more than 2 percentage points beyond the fund's overall share change. These are the public fund's trades, not your SMA account's.</p>
       <div id="holdingsBody"></div>
     </section>

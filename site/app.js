@@ -411,16 +411,87 @@
   }
 
   // ---------- holdings & trades (Eikon) ----------
+  function renderEdition() {
+    const isPublic = DATA.edition === "public";
+    const ed = document.getElementById("edition");
+    ed.textContent = isPublic ? "Public edition · free data" : "Private edition · Eikon";
+    ed.title = isPublic ? "Built daily by GitHub from Yahoo Finance. No licensed data." : "Built on your PC. Includes Eikon data - do not share.";
+  }
+
+  // ---------- Eikon connect box (talks only to the helper on this PC) ----------
+  const LOCAL = ["localhost", "127.0.0.1"].includes(location.hostname);
+  const HELPER = LOCAL ? "" : "http://localhost:8765";      // public site -> helper on the viewer's own PC
+  const KEY_STORE = "emt.eikonKey";
+  const store = {
+    get() { try { return localStorage.getItem(KEY_STORE) || ""; } catch (e) { return ""; } },
+    set(v) { try { localStorage.setItem(KEY_STORE, v); } catch (e) {} },
+    clear() { try { localStorage.removeItem(KEY_STORE); } catch (e) {} },
+  };
+  function setMsg(text, kind = "") {
+    const m = document.getElementById("eikonMsg");
+    m.textContent = text;
+    m.className = "eikon-msg " + kind;
+  }
+  async function fetchTimeout(url, opts = {}, ms = 4000) {
+    const ctl = new AbortController();
+    const t = setTimeout(() => ctl.abort(), ms);
+    try { return await fetch(url, { ...opts, signal: ctl.signal }); } finally { clearTimeout(t); }
+  }
+  async function connectEikon(key, quiet = false) {
+    const btn = document.getElementById("eikonConnect");
+    btn.disabled = true;
+    if (!quiet) setMsg("Looking for the Eikon helper on this PC…");
+    try {
+      try {
+        const p = await fetchTimeout(HELPER + "/api/eikon/ping", {}, 3000);
+        if (!p.ok) throw new Error("HTTP " + p.status);
+      } catch (e) {
+        if (!quiet) setMsg("Can't reach the helper on this PC. Double-click start_eikon_helper.bat, keep Eikon open, then try again. If your browser asks to allow access to local devices, click Allow.", "bad");
+        return;
+      }
+      setMsg("Connected. Pulling holdings from Eikon (this can take a minute)…");
+      const r = await fetchTimeout(HELPER + "/api/eikon/holdings", {
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ app_key: key }),
+      }, 180000);
+      const res = await r.json();
+      if (!r.ok) { setMsg(res.error || "Eikon pull failed.", "bad"); return; }
+      DATA.eikon = res;                                   // held in this page only - never uploaded
+      renderHoldings();
+      const n = Object.keys(res.holdings || {}).length;
+      if (res.status !== "ok") setMsg(res.status, "bad");
+      else setMsg(`Loaded holdings for ${n} of ${DATA.funds.length} managers. Visible only in this browser.`, "good");
+    } catch (e) {
+      setMsg("Eikon request failed: " + (e.name === "AbortError" ? "timed out" : e.message), "bad");
+    } finally {
+      btn.disabled = false;
+    }
+  }
+  function initEikonForm() {
+    const form = document.getElementById("eikonForm");
+    const input = document.getElementById("eikonKey");
+    const remember = document.getElementById("eikonRemember");
+    const saved = store.get();
+    if (saved) { input.value = saved; remember.checked = true; }
+    form.addEventListener("submit", (ev) => {
+      ev.preventDefault();
+      const key = input.value.trim();
+      if (remember.checked && key) store.set(key); else store.clear();
+      connectEikon(key);
+    });
+    remember.addEventListener("change", () => { if (!remember.checked) store.clear(); });
+    if (saved) connectEikon(saved, true);                 // quietly reconnect if the helper is running
+  }
+
   function renderHoldings() {
     const body = document.getElementById("holdingsBody");
     const status = document.getElementById("eikonStatus");
-    const ek = DATA.eikon || { status: "not run", holdings: {} };
+    const ek = DATA.eikon || { status: "not connected", holdings: {} };
     const H = ek.holdings || {};
     const have = Object.keys(H).length;
-    status.textContent = ek.status === "ok" ? `Eikon connected · ${have} of ${DATA.funds.length} managers` : "Eikon not connected";
+    status.textContent = ek.status === "ok" && have ? `Eikon connected · ${have} of ${DATA.funds.length} managers` : "Eikon not connected";
     if (!have) {
-      body.innerHTML = `<div class="card prose"><p><b>No holdings data yet.</b> ${esc(ek.status || "")}</p>
-        <p>To turn this on: open Eikon, put your app key in <code>config/lseg.local.json</code>, run <code>check_eikon.bat</code> once, then <code>run_tracker.bat</code>. Trades appear from the second holdings report onward.</p></div>`;
+      body.innerHTML = `<div class="card prose"><p><b>No holdings loaded.</b> Enter your Eikon app key above and click <b>Load holdings</b>.
+        Trades appear once a fund has two holdings reports saved on your PC.</p></div>`;
       return;
     }
     const W = (v) => (v == null ? "–" : num(v, 2) + "%");
@@ -522,6 +593,7 @@
     applyDefaults(theme());
     renderShock();
     renderRisk();
+    renderEdition();
     renderHoldings();
     renderTimeSeries();
   }
@@ -544,6 +616,7 @@
       document.getElementById("sigmaCfg").textContent = DATA.config.auto_event_sigma;
       renderEventSelect();
       renderAll();
+      initEikonForm();
     })
     .catch((e) => {
       const el = document.getElementById("error");

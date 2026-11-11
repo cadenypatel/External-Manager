@@ -608,7 +608,11 @@ def main():
     ap.add_argument("--event", help="shock day the Excel workbook focuses on (YYYY-MM-DD); default = most recent")
     ap.add_argument("--site-dir", default=str(ROOT / "site"))
     ap.add_argument("--no-eikon", action="store_true", help="skip the Eikon/LSEG pull")
+    ap.add_argument("--public", action="store_true",
+                    help="build the public edition: free data only, never touches Eikon (used by GitHub Actions)")
     args = ap.parse_args()
+    if args.public:
+        args.no_eikon = True
 
     site = Path(args.site_dir)
     (site / "data").mkdir(parents=True, exist_ok=True)
@@ -616,7 +620,7 @@ def main():
     print(f"Downloading {len(all_tickers())} price series (Yahoo)...")
     px = fetch_prices(all_tickers(), HISTORY_YEARS)
 
-    lseg = {"status": "skipped (--no-eikon)", "holdings": {}, "nav": {}}
+    lseg = {"status": "public edition" if args.public else "skipped (--no-eikon)", "holdings": {}, "nav": {}}
     if not args.no_eikon:
         print("Pulling holdings and ETF NAVs from Eikon...")
         import lseg_source
@@ -631,7 +635,9 @@ def main():
     cur_df, bench_df = current_risk(rets, px)
 
     data = build_json(px, rets, events, cur_df, bench_df)
-    data["eikon"] = _clean({"status": lseg["status"], "holdings": lseg["holdings"]})
+    data["edition"] = "public" if args.public else "private"
+    if not args.public:                       # Eikon data only ever goes into the private, local build
+        data["eikon"] = _clean({"status": lseg["status"], "holdings": lseg["holdings"]})
     (site / "data" / "data.json").write_text(json.dumps(data, separators=(",", ":")), encoding="utf-8")
 
     focus = pd.Timestamp(args.event) if args.event else max(events)
