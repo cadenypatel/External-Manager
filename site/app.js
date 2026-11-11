@@ -714,10 +714,10 @@
   function holdingsCard(f, h) {
     const W = (v) => (v == null ? "–" : num(v, 2) + "%");
     const c = h.changes;
-    let rows, changeLabel = "Change";
+    let rows, changeLabel = "Weight change<br><span class=\"th-sub\">awaiting next report</span>";
+    const since = c ? ` since ${shortDate(c.from)}` : "";
     if (c) {
-      const gap = bizDaysBetween(c.from, c.to);
-      changeLabel = gap <= 1 ? "Day-to-day change" : `Change since ${shortDate(c.from)}`;
+      changeLabel = `Weight change<br><span class="th-sub">${shortDate(c.from)} → ${shortDate(c.to)}</span>`;
       rows = c.rows.map((r) => {
         const dw = r.weight_change;
         const flag = r.action === "New position" ? "New position" : r.action === "Sold out" ? "Sold out"
@@ -731,15 +731,17 @@
     const primary = flagged[0];
     const rest = rows.filter((r) => !r.flag).sort((a, b) => (b.weight_now || 0) - (a.weight_now || 0));
     const ordered = [...flagged, ...rest];
-    const flagText = (r) => r.flag === "Up" ? `▲ +${num(r.weight_change, 2)} pp` : r.flag === "Down" ? `▼ ${num(r.weight_change, 2)} pp` : r.flag;
+    const flagText = (r) => r.flag === "Up" ? `▲ +${num(r.weight_change, 2)} pp${since}` : r.flag === "Down" ? `▼ ${num(r.weight_change, 2)} pp${since}`
+      : r.flag ? `${r.flag}${since}` : "";
     const header = c
-      ? `Report ${fmtDate(c.to)} vs ${fmtDate(c.from)}`
-      : `One report on file (${fmtDate(h.as_of)}). Changes appear once Eikon has a second report.`;
+      ? `Latest update <b>${fmtDate(c.to)}</b> · compared with ${fmtDate(c.from)}`
+      : `Latest update <b>${fmtDate(h.as_of)}</b> · first report on file; changes appear when the next update is published`;
     return `<div class="card holdings-card ${flagged.length ? "flagged" : ""}">
       <div class="hc-head"><strong>${esc(f.manager)}</strong>
         ${flagged.length ? `<span class="flag-badge">${flagged.length} notable change${flagged.length > 1 ? "s" : ""}</span>` : (c ? `<span class="calm-badge">No notable changes</span>` : "")}</div>
       <div class="hint hc-sub">${f.ticker} · ${h.n_holdings} holdings · ${header}${h.source ? ` · Source: ${esc(h.source)}` : ""}</div>
-      ${primary ? `<div class="hc-primary">Biggest change: <b>${esc(primary.name)}</b>, ${esc(flagText(primary))}${primary.flag === "Sold out" ? ` (was ${W(primary.weight_prev)})` : primary.flag === "New position" ? ` at ${W(primary.weight_now)}` : ""}</div>` : ""}
+      ${c && h.snapshots.length > 2 ? `<div class="hint hc-sub">Updates on file: ${h.snapshots.map(shortDate).join(", ")}</div>` : ""}
+      ${primary ? `<div class="hc-primary">Biggest change (${shortDate(c.from)} → ${shortDate(c.to)}): <b>${esc(primary.name)}</b>, ${esc(flagText(primary))}${primary.flag === "Sold out" ? ` (was ${W(primary.weight_prev)})` : primary.flag === "New position" ? ` at ${W(primary.weight_now)}` : ""}</div>` : ""}
       <div class="table-scroll hc-table"><table class="data"><thead><tr>
         <th class="txt">Security</th><th>Weight</th><th>${changeLabel}</th><th class="txt">Flag</th></tr></thead><tbody>` +
       ordered.map((r) => `<tr class="${r === primary ? "primary" : r.flag ? "flagged-row" : ""}">
