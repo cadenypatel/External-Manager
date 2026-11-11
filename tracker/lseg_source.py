@@ -233,7 +233,8 @@ def snapshot_key(df, fallback=None):
     """Report date: Eikon's as-of date if available, else the date we asked for, else today."""
     if "date" in df and df["date"].notna().any():
         try:
-            return pd.to_datetime(df["date"].dropna().iloc[0]).strftime("%Y-%m-%d")
+            # Eikon dates each position separately (its last update); the report date is the latest one.
+            return pd.to_datetime(df["date"].dropna(), errors="coerce").max().strftime("%Y-%m-%d")
         except Exception:
             pass
     return fallback or pd.Timestamp.today().strftime("%Y-%m-%d")
@@ -254,7 +255,7 @@ def _fingerprint(df):
     out = pd.DataFrame({"name": df["name"].astype(str).str.strip()})
     for c in ("weight", "shares"):
         if c in df:
-            out[c] = pd.to_numeric(df[c], errors="coerce").round(4)
+            out[c] = pd.to_numeric(df[c], errors="coerce").astype(float).round(4)   # 100 and 100.0 compare equal
     return out.sort_values(list(out.columns)).to_csv(index=False)
 
 
@@ -413,7 +414,8 @@ def pull(fund_list, start=None, app_key=None, progress=None):
             # History: ETFs - each of the last 8 trading days (daily-holdings test);
             # mutual funds - the last 3 month-ends. Identical reports are de-duplicated.
             new_days, distinct = [], set()
-            if len(load_snapshots(t)) < 4:
+            marker = SNAP_DIR / t / ".history_checked"          # past dates only need checking once
+            if not marker.exists():
                 days = backfill_dates(f["vehicle"])
                 for n_day, day in enumerate(days, 1):
                     progress(f"{t}: checking holdings as of {day} ({n_day}/{len(days)})")
@@ -426,6 +428,8 @@ def pull(fund_list, start=None, app_key=None, progress=None):
                         k, saved = save_snapshot(t, hd, fallback_key=day)
                         if saved and k not in new_days:
                             new_days.append(k)
+                marker.parent.mkdir(parents=True, exist_ok=True)
+                marker.write_text(f"checked {pd.Timestamp.today():%Y-%m-%d}: {len(distinct)} distinct holdings sets\n")
             distinct.add(_fingerprint(h))
             key, saved = save_snapshot(t, h)
             dates = [d for d, _ in load_snapshots(t)]

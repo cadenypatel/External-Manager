@@ -651,26 +651,44 @@
         method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ app_key: key }),
       }, 15000);
       if (!start.ok && start.status !== 202) { const j = await start.json().catch(() => ({})); setMsg(j.error || "Eikon pull failed to start.", "bad"); return; }
-      let res = null;
-      const t0 = Date.now();
-      while (Date.now() - t0 < 30 * 60 * 1000) {
-        await new Promise((ok) => setTimeout(ok, 2000));
-        const s = await (await fetchTimeout(HELPER + "/api/eikon/status", {}, 10000)).json();
-        if (s.state === "done") { res = s.result; break; }
-        if (s.state === "error") { setMsg(s.error || "Eikon pull failed.", "bad"); return; }
-        const secs = Math.round((Date.now() - t0) / 1000);
-        setMsg(`Pulling from Eikon (${secs}s): ${s.progress || "working"}…`);
-      }
-      if (!res) { setMsg("Eikon pull is still running after 30 minutes. Check the helper window.", "bad"); return; }
-      DATA.eikon = res;
-      renderHoldings();
-      const n = Object.keys(res.holdings || {}).length, errs = (res.errors || []).slice(0, 4).join(" · ");
-      if (res.status !== "ok") setMsg(res.status, "bad");
-      else if (!n) setMsg(`Connected to Eikon, but no holdings came back. ${errs}`, "bad");
-      else setMsg(`Loaded holdings for ${n} of ${DATA.funds.length} managers. Visible only in this browser.` + (errs ? ` Problems: ${errs}` : ""), n === DATA.funds.length ? "good" : "");
+      await pollJob();
     } catch (e) {
       setMsg("Eikon request failed: " + (e.name === "AbortError" ? "timed out" : e.message), "bad");
     } finally { btn.disabled = false; }
+  }
+  function showEikonResult(res) {
+    DATA.eikon = res;
+    renderHoldings();
+    const n = Object.keys(res.holdings || {}).length, errs = (res.errors || []).slice(0, 4).join(" · ");
+    if (res.status !== "ok") setMsg(res.status, "bad");
+    else if (!n) setMsg(`Connected to Eikon, but no holdings came back. ${errs}`, "bad");
+    else setMsg(`Loaded holdings for ${n} of ${DATA.funds.length} managers. Visible only in this browser.` + (errs ? ` Problems: ${errs}` : ""), n === DATA.funds.length ? "good" : "");
+  }
+  async function pollJob() {
+    const btn = document.getElementById("eikonConnect");
+    btn.disabled = true;
+    const t0 = Date.now();
+    try {
+      while (Date.now() - t0 < 30 * 60 * 1000) {
+        const s = await (await fetchTimeout(HELPER + "/api/eikon/status", {}, 10000)).json();
+        if (s.state === "done") { showEikonResult(s.result); return; }
+        if (s.state === "error") { setMsg(s.error || "Eikon pull failed.", "bad"); return; }
+        if (s.state === "idle") { setMsg(""); return; }
+        setMsg(`Pulling from Eikon (${Math.round((Date.now() - t0) / 1000)}s): ${s.progress || "working"}…`);
+        await new Promise((ok) => setTimeout(ok, 2000));
+      }
+      setMsg("Eikon pull is still running after 30 minutes. Check the helper window.", "bad");
+    } finally { btn.disabled = false; }
+  }
+  async function resumeEikon() {
+    // If the helper on this PC already has results (or a pull in progress), show them without asking again.
+    try {
+      const s = await (await fetchTimeout(HELPER + "/api/eikon/status", {}, 2500)).json();
+      if (s.state === "done" && s.result) showEikonResult(s.result);
+      else if (s.state === "running") await pollJob();
+      else return false;
+      return true;
+    } catch (e) { return false; }
   }
   function initEikonForm() {
     const form = document.getElementById("eikonForm"), input = document.getElementById("eikonKey"), remember = document.getElementById("eikonRemember");
@@ -683,7 +701,7 @@
       connectEikon(key);
     });
     remember.addEventListener("change", () => { if (!remember.checked) store.clear(); });
-    if (saved) connectEikon(saved, true);
+    resumeEikon().then((had) => { if (!had && saved) connectEikon(saved, true); });
   }
 
   // ---------- holdings & trades ----------
