@@ -458,8 +458,10 @@
       DATA.eikon = res;                                   // held in this page only - never uploaded
       renderHoldings();
       const n = Object.keys(res.holdings || {}).length;
+      const errs = (res.errors || []).slice(0, 4).join(" · ");
       if (res.status !== "ok") setMsg(res.status, "bad");
-      else setMsg(`Loaded holdings for ${n} of ${DATA.funds.length} managers. Visible only in this browser.`, "good");
+      else if (!n) setMsg(`Connected to Eikon, but no holdings came back. ${errs}`, "bad");
+      else setMsg(`Loaded holdings for ${n} of ${DATA.funds.length} managers. Visible only in this browser.` + (errs ? ` Problems: ${errs}` : ""), n === DATA.funds.length ? "good" : "");
     } catch (e) {
       setMsg("Eikon request failed: " + (e.name === "AbortError" ? "timed out" : e.message), "bad");
     } finally {

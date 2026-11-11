@@ -112,6 +112,51 @@ def resolve_ids(ld, tickers, cfg):
     return out
 
 
+def _try_field(ld, code, field, params=None):
+    """Return the non-empty values a field gives for one instrument, an 'error: ...' string, or None."""
+    try:
+        df = ld.get_data(code, [field], parameters=params or {})
+        if df is None or df.empty or df.shape[1] < 2:
+            return None
+        vals = df.iloc[:, 1].dropna()
+        vals = vals[vals.astype(str).str.strip() != ""]
+        return vals if len(vals) else None
+    except Exception as e:
+        return f"error: {e}"
+
+
+def discover_fields(ld, codes, etf_codes, log=print):
+    """Try every candidate field and return {item: first field that returns data}.
+    codes: fund instrument codes to test holdings on; etf_codes: for NAV."""
+    found = {}
+    for item, cands in CANDIDATES.items():
+        targets = etf_codes if item == "nav" else codes[:3]
+        if not targets:
+            continue
+        if item == "nav":
+            params = {"SDate": str((pd.Timestamp.today() - pd.Timedelta(days=10)).date()),
+                      "EDate": str(pd.Timestamp.today().date()), "Frq": "D"}
+        else:
+            params = HOLDINGS_PARAMS
+        for fld in cands:
+            results = [_try_field(ld, c, fld, params) for c in targets]
+            ok = [r for r in results if isinstance(r, pd.Series)]
+            errs = [r for r in results if isinstance(r, str)]
+            log(f"  field {item:15s} {fld:34s} {'OK (' + str(len(ok[0])) + ' values)' if ok else 'no data'}"
+                + (f"  [{errs[0][:100]}]" if errs and not ok else ""))
+            if ok:
+                found[item] = fld
+                break
+    return found
+
+
+def save_fields(found):
+    """Store discovered field names in config/lseg.local.json WITHOUT touching or adding the key."""
+    cfg = json.loads(CONFIG_PATH.read_text(encoding="utf-8")) if CONFIG_PATH.exists() else {}
+    cfg.setdefault("fields", {}).update(found)
+    save_config(cfg)
+
+
 def _s(v):
     return None if v is None or (isinstance(v, float) and pd.isna(v)) or str(v).strip() == "" else str(v).strip()
 
@@ -239,23 +284,46 @@ def pull(fund_list, start=None, app_key=None):
         ld = open_session(cfg)
     except LsegUnavailable as e:
         return {"status": str(e), "holdings": {}, "nav": {}}
-    result = {"status": "ok", "holdings": {}, "nav": {}}
+    result = {"status": "ok", "holdings": {}, "nav": {}, "errors": []}
+
+    def err(msg):
+        print("  " + msg, file=sys.stderr)
+        result["errors"].append(msg)
+
     try:
         tickers = [f["ticker"] for f in fund_list]
         ids = resolve_ids(ld, tickers, cfg)
+        codes = {t: fund_universe(ids.get(t, {})) for t in tickers}
+
+        # First connect: work out which field names this Eikon subscription supports.
+        fields = cfg.get("fields") or {}
+        if not (fields.get("holding_name") and fields.get("holding_weight")):
+            print("  Detecting which Eikon fields your subscription supports (first run only)...")
+            have = [c for c in codes.values() if c]
+            etfs = [codes[f["ticker"]] for f in fund_list if f["vehicle"] == "ETF" and codes.get(f["ticker"])]
+            found = discover_fields(ld, have, etfs)
+            if found:
+                save_fields(found)
+                cfg["fields"] = {**fields, **found}
+            if not (found.get("holding_name") and found.get("holding_weight")):
+                err("Eikon returned no holdings for any candidate field. Your subscription may not include "
+                    "Lipper fund holdings - run check_eikon.bat and send the report.")
+
         for f in fund_list:
             t = f["ticker"]
-            code = fund_universe(ids.get(t, {}))
+            code = codes.get(t)
             if not code:
-                print(f"  {t}: no Eikon identifier found (add it under 'ids' in config/lseg.local.json)", file=sys.stderr)
+                err(f"{t}: Eikon could not find this fund (add its Lipper ID under 'ids' in config/lseg.local.json)")
                 continue
             try:
                 h = get_holdings(ld, code, cfg)
-                if not h.empty:
+                if h.empty:
+                    err(f"{t}: Eikon returned no holdings for {code}")
+                else:
                     key = save_snapshot(t, h)
                     print(f"  {t}: {len(h)} holdings as of {key}")
             except Exception as e:
-                print(f"  {t}: holdings failed: {e}", file=sys.stderr)
+                err(f"{t}: holdings failed: {e}")
             if f["vehicle"] == "ETF" and start is not None:
                 try:
                     s = get_nav_history(ld, code, cfg, start)
@@ -263,7 +331,7 @@ def pull(fund_list, start=None, app_key=None):
                         result["nav"][t] = s
                         print(f"  {t}: {len(s)} daily NAVs")
                 except Exception as e:
-                    print(f"  {t}: NAV history failed: {e}", file=sys.stderr)
+                    err(f"{t}: NAV history failed: {e}")
     finally:
         close_session(ld)
 

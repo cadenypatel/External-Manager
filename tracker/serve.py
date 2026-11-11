@@ -105,7 +105,8 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             import lseg_source
             from manager_vol_tracker import FUNDS, _clean
             res = lseg_source.pull(FUNDS, start=None, app_key=app_key)
-            return self._json(200, _clean({"status": res["status"], "holdings": res["holdings"]}))
+            return self._json(200, _clean({"status": res["status"], "holdings": res["holdings"],
+                                           "errors": res.get("errors", [])[:20]}))
         except Exception as e:
             return self._json(500, {"error": f"Eikon pull failed: {e}"})
         finally:
