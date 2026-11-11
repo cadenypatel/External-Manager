@@ -1,24 +1,26 @@
 """
 Equity Manager Tracker
 ----------------------
-Pulls daily total-return (distribution-adjusted) prices for public mutual fund /
-ETF proxies of large cap SMA strategies, then measures volatility, beta and
-downside behaviour, plus how each manager held up on market shock days.
+Pulls daily total-return (distribution-adjusted) end-of-day prices for public
+mutual fund / ETF proxies of large cap SMA strategies, then measures volatility,
+beta and downside behaviour, plus how each manager held up on market shock days.
+
+Benchmarking
+  * Every manager is compared with (1) the benchmark its manager states in the
+    prospectus / fact sheet, (2) the S&P 500, and (3) its style index
+    (Russell 1000 Growth or Russell 1000 Value).
+  * Peer comparisons (rank, peer median) are only ever made WITHIN a style
+    group: growth vs growth, value vs value.
+  * Benchmarks are the actual total-return indexes (S&P 500 TR, Russell 1000
+    Growth TR, Russell 1000 Value TR), not ETFs.
 
 Outputs
-  site/data/data.json          data feed for the website
-  site/Manager_Vol_Tracker.xlsx Excel workbook (also linked from the website)
+  site/data/data.json            data feed for the website
+  site/Manager_Vol_Tracker.xlsx  Excel workbook (also linked from the website)
 
 Usage
-  python tracker/manager_vol_tracker.py                     # default run
-  python tracker/manager_vol_tracker.py --event 2026-11-05  # pick the shock day the Excel sheet focuses on
-
-Shock days: every date listed in EVENTS below, plus any day in the last year
-where the S&P 500 moved at least AUTO_EVENT_SIGMA standard deviations
-(versus its prior 60-day volatility), is analysed automatically.
-
-Data source: Yahoo Finance via yfinance. Mutual fund NAVs post after the close,
-typically 6-8pm ET.
+  python tracker/manager_vol_tracker.py
+  python tracker/manager_vol_tracker.py --event 2026-11-05   # shock day the Excel sheet focuses on
 """
 
 import argparse
@@ -32,7 +34,7 @@ import numpy as np
 import pandas as pd
 import yfinance as yf
 from openpyxl import Workbook
-from openpyxl.chart import LineChart, Reference, ScatterChart, Series
+from openpyxl.chart import Reference, ScatterChart, Series, LineChart
 from openpyxl.chart.marker import Marker
 from openpyxl.styles import Alignment, Font, PatternFill
 from openpyxl.utils import get_column_letter
@@ -42,39 +44,61 @@ ROOT = Path(__file__).resolve().parent.parent
 # ----------------------------------------------------------------------------
 # CONFIGURATION - edit here
 # ----------------------------------------------------------------------------
-# (SMA strategy name, proxy ticker, style, proxy description)
-FUNDS = [
-    ("JPMorgan Large Cap Growth",            "JLGMX", "Growth", "JPMorgan Large Cap Growth Fund R6"),
-    ("Goldman Sachs Strategic Large Growth", "GSGO",  "Growth", "GS Growth Opportunities ETF (successor to GS Strategic Growth Fund, converted Nov 2025)"),
-    ("Alger Focus Equity",                   "ALZFX", "Growth", "Alger Focus Equity Fund Z"),
-    ("Cantor Fitzgerald LC Focused",         "FICIX", "Growth", "Cantor Fitzgerald Large Cap Focused Fund R6"),
-    ("Putnam US LCV Equity Concentrated",    "PVAL",  "Value",  "Putnam Focused Large Cap Value ETF"),
-    ("MFS Large Cap Value",                  "MEIKX", "Value",  "MFS Value Fund R6"),
-    ("Oakmark Large Cap Value",              "OANMX", "Value",  "Oakmark Fund Institutional"),
-    ("BNYM Newton Dynamic Value",            "DRGYX", "Value",  "BNY Mellon Dynamic Value Fund Y"),
-]
-BENCHMARKS = {"Growth": "IWF", "Value": "IWD", "Market": "SPY"}
-BENCH_NAMES = {"IWF": "Russell 1000 Growth (IWF)", "IWD": "Russell 1000 Value (IWD)", "SPY": "S&P 500 (SPY)"}
+SP500, R1G, R1V = "^SP500TR", "^RLGTR", "^RLVTR"
+INDEXES = {
+    SP500: {"name": "S&P 500 Index (TR)",              "short": "S&P 500"},
+    R1G:   {"name": "Russell 1000 Growth Index (TR)",  "short": "R1000 Growth"},
+    R1V:   {"name": "Russell 1000 Value Index (TR)",   "short": "R1000 Value"},
+}
+STYLE_INDEX = {"Growth": R1G, "Value": R1V}
 
-# Shock days to always analyse: (date, label)
-EVENTS = [
-    ("2026-11-05", "Nov 5, 2026 sell-off"),
+# stated_benchmark = the primary benchmark the manager lists; source says where it was confirmed.
+FUNDS = [
+    dict(manager="JPMorgan Large Cap Growth", ticker="JLGMX", style="Growth", vehicle="Mutual fund",
+         description="JPMorgan Large Cap Growth Fund R6", stated_benchmark=R1G,
+         source="Fund prospectus / fact sheet"),
+    dict(manager="Goldman Sachs Strategic Large Growth", ticker="GSGO", style="Growth", vehicle="ETF",
+         description="GS Growth Opportunities ETF (successor to GS Strategic Growth Fund, converted Nov 2025)",
+         stated_benchmark=R1G, source="GSAM fund page: 'Benchmark / Comparative Index: Russell 1000 Growth Index'"),
+    dict(manager="Alger Focus Equity", ticker="ALZFX", style="Growth", vehicle="Mutual fund",
+         description="Alger Focus Equity Fund Z", stated_benchmark=R1G,
+         source="Alger fund and SMA composite fact sheets"),
+    dict(manager="Cantor Fitzgerald LC Focused", ticker="FICIX", style="Growth", vehicle="Mutual fund",
+         description="Cantor Fitzgerald Large Cap Focused Fund R6", stated_benchmark=R1G,
+         source="Cantor LC Focused SMA fact sheet (S&P 500 shown as secondary comparison)"),
+    dict(manager="Putnam US LCV Equity Concentrated", ticker="PVAL", style="Value", vehicle="ETF",
+         description="Putnam Focused Large Cap Value ETF", stated_benchmark=R1V,
+         source="Franklin Templeton PVAL fact sheet, 9/30/2026"),
+    dict(manager="MFS Large Cap Value", ticker="MEIKX", style="Value", vehicle="Mutual fund",
+         description="MFS Value Fund R6", stated_benchmark=R1V, source="Fund prospectus / fact sheet"),
+    dict(manager="Oakmark Large Cap Value", ticker="OANMX", style="Value", vehicle="Mutual fund",
+         description="Oakmark Fund Institutional", stated_benchmark=SP500,
+         source="Oakmark commentary names the S&P 500 as the benchmark; Russell 1000 Value is secondary"),
+    dict(manager="BNYM Newton Dynamic Value", ticker="DRGYX", style="Value", vehicle="Mutual fund",
+         description="BNY Mellon Dynamic Value Fund Y", stated_benchmark=R1V,
+         source="BNY Mellon fact sheet, 9/30/2026"),
 ]
-AUTO_EVENT_SIGMA = 3.0      # also auto-flag S&P 500 days beyond this many sigmas (last year)
+
+EVENTS = [("2026-11-05", "Nov 5, 2026 sell-off")]
+AUTO_EVENT_SIGMA = 3.0
 HISTORY_YEARS = 3
 TRADING_DAYS = 252
-WINDOW_BEFORE, WINDOW_AFTER = 5, 10   # event path chart: trading days around the event
+WINDOW_BEFORE, WINDOW_AFTER = 5, 10
 
 # ----------------------------------------------------------------------------
 # DATA
 # ----------------------------------------------------------------------------
 
 def fund_tickers():
-    return [t for _, t, _, _ in FUNDS]
+    return [f["ticker"] for f in FUNDS]
 
 
 def all_tickers():
-    return fund_tickers() + ["IWF", "IWD", "SPY"]
+    return fund_tickers() + [R1G, R1V, SP500]
+
+
+def pricing_basis(f):
+    return "Daily NAV (4pm ET)" if f["vehicle"] == "Mutual fund" else "Daily closing price (4pm ET)"
 
 
 def fetch_prices(tickers, years):
@@ -86,9 +110,9 @@ def fetch_prices(tickers, years):
     missing = [t for t in tickers if t not in px.columns or px[t].dropna().empty]
     if missing:
         print(f"WARNING: no data returned for {missing}", file=sys.stderr)
-    if "SPY" not in px.columns or px["SPY"].dropna().empty:
-        raise SystemExit("No S&P 500 (SPY) data returned - aborting so the last good data is kept.")
-    px = px[px["SPY"].notna()]                         # market days only
+    if SP500 not in px.columns or px[SP500].dropna().empty:
+        raise SystemExit("No S&P 500 data returned - aborting so the last good site stays up.")
+    px = px[px[SP500].notna()]
     return px[[t for t in tickers if t in px.columns]]
 
 
@@ -122,7 +146,6 @@ def tracking_error(r, b):
 
 
 def capture(r, b, side):
-    """Compounded fund return / compounded benchmark return on the benchmark's up or down days."""
     d = _pair(r, b, 1)
     if d is None:
         return np.nan
@@ -147,13 +170,17 @@ def period_return(s, start_date):
     return np.nan if base.empty or s.empty else s.iloc[-1] / base.iloc[-1] - 1
 
 
-def spy_sigma_series(rets):
-    sd = rets["SPY"].rolling(60, min_periods=40).std().shift(1)
-    return rets["SPY"] / sd
+def add_peer_stats(df, key, higher_is_better=True, prefix=None):
+    """Rank and median WITHIN each style group only."""
+    prefix = prefix or key
+    df[f"{prefix}_peer_median"] = df.groupby("style")[key].transform("median")
+    df[f"{prefix}_vs_peer"] = df[key] - df[f"{prefix}_peer_median"]
+    df[f"{prefix}_peer_rank"] = df.groupby("style")[key].rank(ascending=not higher_is_better, method="min")
+    df[f"peer_count"] = df.groupby("style")[key].transform("count")
+    return df
 
 
 def find_events(rets):
-    """Configured events plus auto-detected S&P 500 shock days in the last year."""
     out = {}
     for d, label in EVENTS:
         ts = pd.Timestamp(d)
@@ -161,113 +188,122 @@ def find_events(rets):
             out[ts] = {"label": label, "auto": False}
         else:
             print(f"WARNING: configured event {d} is not a trading day in the data - skipped", file=sys.stderr)
-    sig = spy_sigma_series(rets).iloc[-TRADING_DAYS:]
+    sd = rets[SP500].rolling(60, min_periods=40).std().shift(1)
+    sig = (rets[SP500] / sd).iloc[-TRADING_DAYS:]
     for ts, s in sig[sig.abs() >= AUTO_EVENT_SIGMA].items():
         if ts not in out:
-            r = rets.at[ts, "SPY"]
+            r = rets.at[ts, SP500]
             out[ts] = {"label": f"{ts:%b %d, %Y} S&P 500 {'drop' if r < 0 else 'rally'} ({s:+.1f} sigma)", "auto": True}
     return dict(sorted(out.items()))
 
 
 def event_analysis(rets, px, event):
     pre = rets[rets.index < event]
-    spy_ev = rets.at[event, "SPY"]
+    spy_ev = rets.at[event, SP500]
     rows = []
-    for name, tkr, style, _ in FUNDS:
+    for f in FUNDS:
+        tkr, style = f["ticker"], f["style"]
         if tkr not in rets.columns:
             continue
-        bt = BENCHMARKS[style]
+        sb, si = f["stated_benchmark"], STYLE_INDEX[style]
         r_pre = pre[tkr].dropna()
-        ev, bench_ev = rets.at[event, tkr], rets.at[event, bt]
+        ev = rets.at[event, tkr]
         sd60 = r_pre.iloc[-60:].std()
         r1y = r_pre.iloc[-TRADING_DAYS:]
-        b_spy = beta(r1y, pre["SPY"])
+        b_spy = beta(r1y, pre[SP500])
         rows.append({
-            "manager": name, "ticker": tkr, "style": style, "benchmark": bt,
+            "manager": f["manager"], "ticker": tkr, "style": style,
+            "stated_benchmark": sb, "style_index": si,
             "event_ret": ev,
-            "bench_ret": bench_ev,
-            "excess_bmk": ev - bench_ev,
+            "stated_bmk_ret": rets.at[event, sb],
+            "excess_stated": ev - rets.at[event, sb],
+            "style_index_ret": rets.at[event, si],
+            "excess_style": ev - rets.at[event, si],
             "excess_spy": ev - spy_ev,
             "sigma_own": ev / sd60 if sd60 else np.nan,
             "vol20_pre": ann_vol(r_pre.iloc[-20:]),
             "vol60_pre": ann_vol(r_pre.iloc[-60:]),
             "vol1y_pre": ann_vol(r1y),
             "beta_spy_pre": b_spy,
-            "beta_bmk_pre": beta(r1y, pre[bt]),
-            "down_cap_pre": capture(r1y, pre[bt], "down"),
+            "beta_stated_pre": beta(r1y, pre[sb]),
+            "down_cap_pre": capture(r1y, pre[sb], "down"),
             "pred_ret": b_spy * spy_ev,
             "alpha_day": ev - b_spy * spy_ev,
             "since_event": period_return(px[tkr], event),
         })
     df = pd.DataFrame(rows)
-    spy_pre = pre["SPY"].dropna()
+    df = add_peer_stats(df, "event_ret", True, "event")
+    spy_pre = pre[SP500].dropna()
     market = {
         "spy_ret": spy_ev,
         "spy_sigma60": spy_ev / spy_pre.iloc[-60:].std(),
         "spy_sigma1y": spy_ev / spy_pre.iloc[-TRADING_DAYS:].std(),
-        "iwf_ret": rets.at[event, "IWF"],
-        "iwd_ret": rets.at[event, "IWD"],
+        "r1g_ret": rets.at[event, R1G],
+        "r1v_ret": rets.at[event, R1V],
     }
     groups = []
     for style in ("Growth", "Value"):
         g = df[df["style"] == style]
-        groups.append({"style": style, **{k: g[k].mean() for k in
-                       ["event_ret", "excess_bmk", "vol60_pre", "beta_spy_pre", "down_cap_pre", "alpha_day", "since_event"]}})
+        si = STYLE_INDEX[style]
+        groups.append({"style": style, "style_index": si, "style_index_ret": rets.at[event, si],
+                       "n": int(len(g)), "event_ret_median": g["event_ret"].median(),
+                       **{k: g[k].mean() for k in ["event_ret", "excess_stated", "excess_style", "excess_spy",
+                                                   "vol60_pre", "beta_spy_pre", "down_cap_pre", "alpha_day", "since_event"]}})
     corr_tests = [
-        ("Pre-event 60d volatility vs event-day return", "vol60_pre", "event_ret"),
-        ("Pre-event beta vs event-day return", "beta_spy_pre", "event_ret"),
-        ("Pre-event downside capture vs excess vs benchmark", "down_cap_pre", "excess_bmk"),
+        ("Pre-event 60d volatility vs event-day return (all 8)", "vol60_pre", "event_ret"),
+        ("Pre-event beta vs event-day return (all 8)", "beta_spy_pre", "event_ret"),
+        ("Pre-event downside capture vs excess vs stated benchmark (all 8)", "down_cap_pre", "excess_stated"),
     ]
     corrs = [{"label": l, "x": x, "y": y, "value": df[x].corr(df[y])} for l, x, y in corr_tests]
     return df, market, groups, corrs
 
 
 def event_window(px, event):
-    """Cumulative total return from the close BEFORE the event, t-WINDOW_BEFORE..t+WINDOW_AFTER."""
     idx = px.index
     i = idx.get_loc(event)
     lo, hi = max(i - WINDOW_BEFORE, 1), min(i + WINDOW_AFTER, len(idx) - 1)
-    base_px = px.iloc[i - 1]
     win = px.iloc[lo:hi + 1]
-    cum = win / base_px - 1
-    return {
-        "dates": [d.strftime("%Y-%m-%d") for d in win.index],
-        "offsets": list(range(lo - i, hi - i + 1)),
-        "series": {t: cum[t].tolist() for t in px.columns},
-    }
+    cum = win / px.iloc[i - 1] - 1
+    return {"dates": [d.strftime("%Y-%m-%d") for d in win.index],
+            "offsets": list(range(lo - i, hi - i + 1)),
+            "series": {t: cum[t].tolist() for t in px.columns}}
 
 
 def current_risk(rets, px):
     last = rets.index[-1]
     ytd_start = pd.Timestamp(year=last.year, month=1, day=1) - pd.Timedelta(days=1)
-    rows = []
-    entries = [(n, t, s, BENCHMARKS[s]) for n, t, s, _ in FUNDS if t in rets.columns]
-    entries += [(BENCH_NAMES[b], b, "Benchmark", None) for b in ("IWF", "IWD", "SPY")]
-    for name, tkr, style, bt in entries:
+
+    def row(name, tkr, style, sb, basis):
         r = rets[tkr].dropna()
         r1y = r.iloc[-TRADING_DAYS:]
         ld = r.index[-1]
-        rows.append({
-            "manager": name, "ticker": tkr, "style": style, "benchmark": bt or "",
-            "last_date": ld.strftime("%Y-%m-%d"),
+        has_b = sb is not None
+        return {
+            "manager": name, "ticker": tkr, "style": style, "stated_benchmark": sb or "",
+            "pricing_basis": basis, "last_date": ld.strftime("%Y-%m-%d"),
             "ret_1d": r.iloc[-1],
             "ret_1m": period_return(px[tkr], ld - pd.DateOffset(months=1)),
             "ret_3m": period_return(px[tkr], ld - pd.DateOffset(months=3)),
             "ret_ytd": period_return(px[tkr], ytd_start),
             "ret_1y": period_return(px[tkr], ld - pd.DateOffset(years=1)),
-            "vol20": ann_vol(r.iloc[-20:]),
-            "vol60": ann_vol(r.iloc[-60:]),
-            "vol1y": ann_vol(r1y),
-            "beta_spy": beta(r1y, rets["SPY"]),
-            "beta_bmk": beta(r1y, rets[bt]) if bt else np.nan,
-            "corr_bmk": correlation(r1y, rets[bt]) if bt else np.nan,
-            "te_bmk": tracking_error(r1y, rets[bt]) if bt else np.nan,
-            "up_cap": capture(r1y, rets[bt], "up") if bt else np.nan,
-            "down_cap": capture(r1y, rets[bt], "down") if bt else np.nan,
+            "vol20": ann_vol(r.iloc[-20:]), "vol60": ann_vol(r.iloc[-60:]), "vol1y": ann_vol(r1y),
+            "beta_spy": beta(r1y, rets[SP500]),
+            "beta_stated": beta(r1y, rets[sb]) if has_b else np.nan,
+            "corr_stated": correlation(r1y, rets[sb]) if has_b else np.nan,
+            "te_stated": tracking_error(r1y, rets[sb]) if has_b else np.nan,
+            "up_cap": capture(r1y, rets[sb], "up") if has_b else np.nan,
+            "down_cap": capture(r1y, rets[sb], "down") if has_b else np.nan,
             "max_dd_1y": max_drawdown(r1y),
             "obs_1y": int(len(r1y)),
-        })
-    return pd.DataFrame(rows)
+        }
+
+    rows = [row(f["manager"], f["ticker"], f["style"], f["stated_benchmark"], pricing_basis(f))
+            for f in FUNDS if f["ticker"] in rets.columns]
+    df = pd.DataFrame(rows)
+    df = add_peer_stats(df, "vol20", False, "vol20")      # rank 1 = lowest short-term vol in peer group
+    df = add_peer_stats(df, "ret_1m", True, "ret_1m")
+    bench = pd.DataFrame([row(INDEXES[b]["name"], b, "Benchmark", None, "Index level (close)") for b in (R1G, R1V, SP500)])
+    return df, bench
 
 
 # ----------------------------------------------------------------------------
@@ -289,31 +325,27 @@ def _clean(o):
     return o
 
 
-def build_json(px, rets, events, cur_df):
+def build_json(px, rets, events, cur_df, bench_df):
     roll = rets.rolling(20, min_periods=15).std() * np.sqrt(TRADING_DAYS)
     ev_out = []
     for ts, meta in events.items():
         df, market, groups, corrs = event_analysis(rets, px, ts)
-        ev_out.append({
-            "date": ts.strftime("%Y-%m-%d"), "label": meta["label"], "auto": meta["auto"],
-            "market": market, "rows": df.to_dict("records"), "groups": groups,
-            "correlations": corrs, "window": event_window(px, ts),
-        })
+        ev_out.append({"date": ts.strftime("%Y-%m-%d"), "label": meta["label"], "auto": meta["auto"],
+                       "market": market, "rows": df.to_dict("records"), "groups": groups,
+                       "correlations": corrs, "window": event_window(px, ts)})
     return _clean({
         "generated_utc": dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
         "as_of": rets.index[-1].strftime("%Y-%m-%d"),
         "config": {"auto_event_sigma": AUTO_EVENT_SIGMA, "trading_days": TRADING_DAYS,
                    "window_before": WINDOW_BEFORE, "window_after": WINDOW_AFTER},
-        "funds": [{"manager": n, "ticker": t, "style": s, "description": d,
-                   "benchmark": BENCHMARKS[s], "benchmark_name": BENCH_NAMES[BENCHMARKS[s]]} for n, t, s, d in FUNDS],
-        "benchmarks": BENCH_NAMES,
+        "indexes": INDEXES, "style_index": STYLE_INDEX, "sp500": SP500,
+        "funds": [{**f, "pricing_basis": pricing_basis(f)} for f in FUNDS],
         "current": cur_df.to_dict("records"),
+        "current_benchmarks": bench_df.to_dict("records"),
         "events": ev_out,
-        "series": {
-            "dates": [d.strftime("%Y-%m-%d") for d in px.index],
-            "price": {t: px[t].tolist() for t in px.columns},
-            "vol20": {t: roll[t].tolist() for t in px.columns},
-        },
+        "series": {"dates": [d.strftime("%Y-%m-%d") for d in px.index],
+                   "price": {t: px[t].tolist() for t in px.columns},
+                   "vol20": {t: roll[t].tolist() for t in px.columns}},
     })
 
 
@@ -321,25 +353,34 @@ def build_json(px, rets, events, cur_df):
 # EXCEL
 # ----------------------------------------------------------------------------
 LABELS = {
-    "manager": "Manager", "ticker": "Proxy", "style": "Style", "benchmark": "Benchmark",
-    "event_ret": "Event-day return", "bench_ret": "Benchmark return", "excess_bmk": "Excess vs benchmark",
-    "excess_spy": "Excess vs S&P 500", "sigma_own": "Move in own sigmas", "vol20_pre": "Pre-event vol 20d (ann.)",
-    "vol60_pre": "Pre-event vol 60d (ann.)", "vol1y_pre": "Pre-event vol 1y (ann.)",
-    "beta_spy_pre": "Pre-event beta vs S&P 500 (1y)", "beta_bmk_pre": "Pre-event beta vs style bmk (1y)",
-    "down_cap_pre": "Pre-event downside capture vs bmk (1y)", "pred_ret": "Beta-predicted return",
-    "alpha_day": "Unexplained by beta (alpha on day)", "since_event": "Return since event close",
-    "last_date": "Last NAV date", "ret_1d": "1-day return", "ret_1m": "1-month return", "ret_3m": "3-month return",
-    "ret_ytd": "YTD return", "ret_1y": "1-year return", "vol20": "Vol 20d (ann.)", "vol60": "Vol 60d (ann.)",
-    "vol1y": "Vol 1y (ann.)", "beta_spy": "Beta vs S&P 500 (1y)", "beta_bmk": "Beta vs style bmk (1y)",
-    "corr_bmk": "Correlation vs bmk (1y)", "te_bmk": "Tracking error vs bmk (1y)", "up_cap": "Upside capture (1y)",
-    "down_cap": "Downside capture (1y)", "max_dd_1y": "Max drawdown (1y)", "obs_1y": "Obs. in 1y window",
+    "manager": "Manager", "ticker": "Proxy", "style": "Peer group", "stated_benchmark": "Stated benchmark",
+    "style_index": "Style index", "pricing_basis": "Pricing basis",
+    "event_ret": "Event-day return", "stated_bmk_ret": "Stated benchmark return", "excess_stated": "vs stated benchmark",
+    "style_index_ret": "Style index return", "excess_style": "vs style index", "excess_spy": "vs S&P 500",
+    "event_peer_median": "Peer median", "event_vs_peer": "vs peer median", "event_peer_rank": "Peer rank",
+    "peer_count": "Peers", "sigma_own": "Move in own sigmas",
+    "vol20_pre": "Pre-event vol 20d", "vol60_pre": "Pre-event vol 60d", "vol1y_pre": "Pre-event vol 1y",
+    "beta_spy_pre": "Pre-event beta vs S&P 500", "beta_stated_pre": "Pre-event beta vs stated bmk",
+    "down_cap_pre": "Pre-event downside capture vs stated bmk", "pred_ret": "Beta-predicted return",
+    "alpha_day": "Beyond beta", "since_event": "Since event close",
+    "last_date": "Last price date", "ret_1d": "1D", "ret_1m": "1M", "ret_3m": "3M", "ret_ytd": "YTD", "ret_1y": "1Y",
+    "vol20": "Vol 20d", "vol60": "Vol 60d", "vol1y": "Vol 1y", "beta_spy": "Beta vs S&P 500",
+    "beta_stated": "Beta vs stated bmk", "corr_stated": "Corr vs stated bmk", "te_stated": "Tracking error vs stated bmk",
+    "up_cap": "Upside capture", "down_cap": "Downside capture", "max_dd_1y": "Max drawdown 1y", "obs_1y": "Obs (1y)",
+    "vol20_peer_rank": "Vol 20d peer rank (1=lowest)", "vol20_peer_median": "Vol 20d peer median",
+    "ret_1m_peer_rank": "1M peer rank", "n": "Managers", "event_ret_median": "Median event-day return",
 }
-RATIO_KEYS = {"sigma_own", "beta_spy_pre", "beta_bmk_pre", "down_cap_pre", "beta_spy", "beta_bmk",
-              "corr_bmk", "up_cap", "down_cap"}
-TEXT_KEYS = {"manager", "ticker", "style", "benchmark", "last_date", "obs_1y"}
+RATIO_KEYS = {"sigma_own", "beta_spy_pre", "beta_stated_pre", "down_cap_pre", "beta_spy", "beta_stated",
+              "corr_stated", "up_cap", "down_cap"}
+TEXT_KEYS = {"manager", "ticker", "style", "stated_benchmark", "style_index", "pricing_basis", "last_date",
+             "obs_1y", "event_peer_rank", "peer_count", "vol20_peer_rank", "ret_1m_peer_rank", "n"}
 HDR_FILL, HDR_FONT = PatternFill("solid", fgColor="1F3864"), Font(color="FFFFFF", bold=True)
-FILLS = {"Growth": PatternFill("solid", fgColor="E2EFDA"), "Value": PatternFill("solid", fgColor="DDEBF7"),
+FILLS = {"Growth": PatternFill("solid", fgColor="DDEBF7"), "Value": PatternFill("solid", fgColor="FCE4D6"),
          "Benchmark": PatternFill("solid", fgColor="F2F2F2")}
+
+
+def idx_name(v):
+    return INDEXES[v]["name"] if v in INDEXES else v
 
 
 def write_table(ws, df, r0):
@@ -348,14 +389,18 @@ def write_table(ws, df, r0):
         c = ws.cell(row=r0, column=j, value=LABELS.get(k, k))
         c.fill, c.font = HDR_FILL, HDR_FONT
         c.alignment = Alignment(wrap_text=True, vertical="center", horizontal="center")
-        ws.column_dimensions[get_column_letter(j)].width = 34 if k == "manager" else 14
-    ws.row_dimensions[r0].height = 45
+        ws.column_dimensions[get_column_letter(j)].width = 34 if k == "manager" else (26 if k in ("stated_benchmark", "style_index", "pricing_basis") else 13)
+    ws.row_dimensions[r0].height = 48
     for i, row in enumerate(df.to_dict("records"), start=1):
         fill = FILLS.get(row.get("style"))
         for j, k in enumerate(cols, start=1):
             v = row[k]
             if isinstance(v, float) and math.isnan(v):
                 v = None
+            if k in ("stated_benchmark", "style_index", "ticker") and isinstance(v, str):
+                v = idx_name(v) if k != "ticker" else (INDEXES[v]["short"] if v in INDEXES else v)
+            if k in ("event_peer_rank", "vol20_peer_rank", "ret_1m_peer_rank", "peer_count") and v is not None:
+                v = int(v)
             c = ws.cell(row=r0 + i, column=j, value=v)
             if k not in TEXT_KEYS and isinstance(v, (int, float)):
                 c.number_format = "0.00" if k in RATIO_KEYS else "0.00%"
@@ -391,47 +436,70 @@ def add_scatter(ws, anchor, title, x_title, df, x_key, data_row0, data_col0):
     ws.add_chart(ch, anchor)
 
 
-def build_workbook(path, px, rets, event, label, cur_df):
+EVENT_COLS = ["manager", "ticker", "stated_benchmark", "event_ret", "stated_bmk_ret", "excess_stated",
+              "excess_spy", "style_index_ret", "excess_style", "event_peer_median", "event_vs_peer", "event_peer_rank",
+              "sigma_own", "vol20_pre", "vol60_pre", "vol1y_pre", "beta_spy_pre", "beta_stated_pre", "down_cap_pre",
+              "pred_ret", "alpha_day", "since_event"]
+RISK_COLS = ["manager", "ticker", "stated_benchmark", "pricing_basis", "last_date", "ret_1d", "ret_1m", "ret_1m_peer_rank",
+             "ret_3m", "ret_ytd", "ret_1y", "vol20", "vol20_peer_rank", "vol60", "vol1y", "beta_spy", "beta_stated",
+             "corr_stated", "te_stated", "up_cap", "down_cap", "max_dd_1y"]
+
+
+def build_workbook(path, px, rets, event, label, cur_df, bench_df):
     df, market, groups, corrs = event_analysis(rets, px, event)
     wb = Workbook()
     ws = wb.active
     ws.title = "Event Analysis"
     ws["A1"] = f"Shock-day analysis: {label} ({event:%A %d %b %Y})"
     ws["A1"].font = Font(bold=True, size=14)
-    ws["A2"] = "Pre-event metrics use only data BEFORE the event date. Green = growth, blue = value."
+    ws["A2"] = ("Peer ranks and medians are within the style group only (growth vs growth, value vs value). "
+                "Benchmarks are total-return indexes. Pre-event metrics use only data before the event.")
     ws["A2"].font = Font(italic=True, color="595959")
-    mk = [("S&P 500 event-day return", market["spy_ret"], "0.00%"),
+    mk = [("S&P 500 TR event-day return", market["spy_ret"], "0.00%"),
           ("S&P 500 move in sigmas (vs prior 60d)", market["spy_sigma60"], "0.00"),
           ("S&P 500 move in sigmas (vs prior 1y)", market["spy_sigma1y"], "0.00"),
-          ("Russell 1000 Growth event-day return", market["iwf_ret"], "0.00%"),
-          ("Russell 1000 Value event-day return", market["iwd_ret"], "0.00%")]
+          ("Russell 1000 Growth TR event-day return", market["r1g_ret"], "0.00%"),
+          ("Russell 1000 Value TR event-day return", market["r1v_ret"], "0.00%")]
     for i, (k, v, f) in enumerate(mk, start=4):
         ws.cell(row=i, column=1, value=k).font = Font(bold=True)
         ws.cell(row=i, column=2, value=float(v)).number_format = f
-    r = write_table(ws, df, 10) + 2
-    ws.cell(row=r, column=1, value="Growth vs Value averages").font = Font(bold=True, size=12)
-    gdf = pd.DataFrame(groups).rename(columns={"style": "manager"})
+    r = 10
+    for style in ("Growth", "Value"):
+        ws.cell(row=r, column=1, value=f"{style} peer group").font = Font(bold=True, size=12)
+        sub = df[df["style"] == style].sort_values("event_ret", ascending=False)[EVENT_COLS + ["style"]]
+        r = write_table(ws, sub.drop(columns="style").assign(style=style), r + 1) + 2
+    ws.cell(row=r, column=1, value="Peer group averages").font = Font(bold=True, size=12)
+    gdf = pd.DataFrame(groups)[["style", "n", "style_index", "style_index_ret", "event_ret", "event_ret_median",
+                                "excess_stated", "excess_style", "excess_spy", "vol60_pre", "beta_spy_pre",
+                                "down_cap_pre", "alpha_day", "since_event"]]
     r = write_table(ws, gdf, r + 1) + 2
-    ws.cell(row=r, column=1, value="Correlation across the managers (directional - small sample)").font = Font(bold=True, size=12)
+    ws.cell(row=r, column=1, value="Correlation across all 8 managers (directional - small sample)").font = Font(bold=True, size=12)
     for i, c in enumerate(corrs, start=1):
         ws.cell(row=r + i, column=1, value=c["label"])
         ws.cell(row=r + i, column=2, value=float(c["value"])).number_format = "0.00"
     chart_row = r + len(corrs) + 3
-    data_col = len(df.columns) + 3
+    data_col = len(EVENT_COLS) + 4
     add_scatter(ws, f"A{chart_row}", "Pre-event volatility vs event-day return", "Pre-event 60d vol (ann.)", df, "vol60_pre", 4, data_col)
     add_scatter(ws, f"J{chart_row}", "Pre-event beta vs event-day return", "Beta vs S&P 500 (1y)", df, "beta_spy_pre", 16, data_col)
     ws.freeze_panes = "C1"
 
     ws2 = wb.create_sheet("Current Risk")
-    ws2["A1"] = f"Risk snapshot as of {rets.index[-1].date()} (ETFs/benchmarks may show a newer date than mutual fund NAVs)"
+    ws2["A1"] = f"Risk snapshot as of {rets.index[-1].date()} - peer ranks within style group (vol rank 1 = lowest vol)"
     ws2["A1"].font = Font(bold=True, size=13)
-    write_table(ws2, cur_df, 3)
-    ws2.freeze_panes = "C4"
+    r = 3
+    for style in ("Growth", "Value"):
+        ws2.cell(row=r, column=1, value=f"{style} peer group").font = Font(bold=True, size=12)
+        sub = cur_df[cur_df["style"] == style][RISK_COLS].assign(style=style)
+        r = write_table(ws2, sub, r + 1) + 2
+    ws2.cell(row=r, column=1, value="Benchmarks").font = Font(bold=True, size=12)
+    write_table(ws2, bench_df[[c for c in RISK_COLS if c in bench_df.columns]].assign(style="Benchmark"), r + 1)
+    ws2.freeze_panes = "C1"
 
     order = [t for t in all_tickers() if t in rets.columns]
     roll = (rets[order].rolling(20, min_periods=15).std() * np.sqrt(TRADING_DAYS)).iloc[-TRADING_DAYS:]
+    nice = lambda t: INDEXES[t]["short"] if t in INDEXES else t
     ws3 = wb.create_sheet("Rolling Vol 20d")
-    for j, t in enumerate(["Date"] + order, start=1):
+    for j, t in enumerate(["Date"] + [nice(t) for t in order], start=1):
         c = ws3.cell(row=1, column=j, value=t)
         c.fill, c.font = HDR_FILL, HDR_FONT
     for i, (d, row) in enumerate(roll.iterrows(), start=2):
@@ -440,14 +508,14 @@ def build_workbook(path, px, rets, event, label, cur_df):
             if pd.notna(row[t]):
                 ws3.cell(row=i, column=j, value=float(row[t])).number_format = "0.0%"
     n = len(roll) + 1
-    for title, style, bt, anchor in [("Growth managers - 20d rolling vol vs IWF", "Growth", "IWF", "N2"),
-                                     ("Value managers - 20d rolling vol vs IWD", "Value", "IWD", "N22")]:
+    for title, style, anchor in [("Growth peers - 20d rolling vol vs Russell 1000 Growth", "Growth", "N2"),
+                                 ("Value peers - 20d rolling vol vs Russell 1000 Value", "Value", "N22")]:
         lc = LineChart()
         lc.title, lc.height, lc.width = title, 9, 20
         lc.y_axis.number_format, lc.x_axis.number_format = "0%", "mmm-yy"
         lc.x_axis.delete = lc.y_axis.delete = False
         lc.legend.position, lc.legend.overlay = "b", False
-        for t in [t for _, t, s, _ in FUNDS if s == style and t in order] + [bt]:
+        for t in [f["ticker"] for f in FUNDS if f["style"] == style and f["ticker"] in order] + [STYLE_INDEX[style]]:
             lc.add_data(Reference(ws3, min_col=order.index(t) + 2, min_row=1, max_row=n), titles_from_data=True)
         lc.set_categories(Reference(ws3, min_col=1, min_row=2, max_row=n))
         for s in lc.series:
@@ -459,7 +527,7 @@ def build_workbook(path, px, rets, event, label, cur_df):
 
     for name, frame, fmt in [("Daily Returns", rets[order].iloc[1:], "0.00%"), ("Prices (TR adj.)", px[order], "0.0000")]:
         w = wb.create_sheet(name)
-        for j, t in enumerate(["Date"] + order, start=1):
+        for j, t in enumerate(["Date"] + [nice(t) for t in order], start=1):
             c = w.cell(row=1, column=j, value=t)
             c.fill, c.font = HDR_FILL, HDR_FONT
         for i, (d, row) in enumerate(frame.sort_index(ascending=False).iterrows(), start=2):
@@ -473,20 +541,24 @@ def build_workbook(path, px, rets, event, label, cur_df):
     wn = wb.create_sheet("Notes & Mapping")
     wn["A1"] = "SMA strategy to proxy mapping"
     wn["A1"].font = Font(bold=True, size=13)
-    for i, (n_, t, s, d) in enumerate([("SMA strategy", "Proxy", "Style", "Proxy description")] + FUNDS, start=3):
-        for j, v in enumerate((n_, t, s, d), start=1):
-            c = wn.cell(row=i, column=j, value=v)
-            if i == 3:
-                c.fill, c.font = HDR_FILL, HDR_FONT
-    wn.column_dimensions["A"].width, wn.column_dimensions["D"].width = 38, 80
+    hdr = ["SMA strategy", "Proxy", "Peer group", "Vehicle", "Pricing basis", "Proxy fund", "Stated benchmark", "Benchmark source"]
+    for j, h in enumerate(hdr, start=1):
+        c = wn.cell(row=3, column=j, value=h)
+        c.fill, c.font = HDR_FILL, HDR_FONT
+    for i, f in enumerate(FUNDS, start=4):
+        for j, v in enumerate([f["manager"], f["ticker"], f["style"], f["vehicle"], pricing_basis(f), f["description"],
+                               idx_name(f["stated_benchmark"]), f["source"]], start=1):
+            wn.cell(row=i, column=j, value=v)
+    for col, w in zip("ABCDEFGH", (36, 9, 11, 12, 26, 60, 30, 70)):
+        wn.column_dimensions[col].width = w
     notes = [
-        "Prices are total-return adjusted (distributions reinvested), so year-end distributions do not show as losses.",
+        "Benchmarks are total-return index levels (S&P 500 TR, Russell 1000 Growth TR, Russell 1000 Value TR) from Yahoo Finance.",
+        "Each manager is shown against its stated benchmark, the S&P 500 and its style index. Peer ranks/medians are within style group only.",
+        "Returns are end-of-day (4pm ET): NAV for mutual funds, closing price for the two ETFs. No intraday data is used.",
         "Volatility = stdev of daily returns x sqrt(252). Beta = cov(fund, index) / var(index), trailing year.",
-        "Downside capture = compounded fund return / compounded benchmark return on benchmark down days (<1.00 = lost less).",
-        "Beta-predicted return = pre-event beta to S&P 500 x S&P 500 event-day return; 'unexplained by beta' is the remainder.",
-        "Mutual funds strike one NAV at the 4pm ET close; intraday swings that reversed are invisible. GSGO and PVAL are ETFs.",
-        "Public-fund proxies can differ from actual SMA accounts (cash, fees, restrictions, tax-loss harvesting).",
-        "GSGO history starts 17-Nov-2025 (converted from the GS Strategic Growth mutual fund).",
+        "Downside capture = compounded fund return / compounded stated-benchmark return on benchmark down days (<1.00 = lost less).",
+        "Beyond beta = event-day return minus (pre-event beta to S&P 500 x S&P 500 event-day return).",
+        "Proxies vs SMAs: same team and process, but holdings, trade timing, cash, client restrictions and TLH differ - see website methodology.",
     ]
     for i, t in enumerate(notes, start=len(FUNDS) + 6):
         wn.cell(row=i, column=1, value=t)
@@ -503,15 +575,15 @@ def main():
     site = Path(args.site_dir)
     (site / "data").mkdir(parents=True, exist_ok=True)
 
-    print(f"Downloading {len(all_tickers())} tickers...")
+    print(f"Downloading {len(all_tickers())} series...")
     px = fetch_prices(all_tickers(), HISTORY_YEARS)
     rets = px.pct_change(fill_method=None)
     events = find_events(rets)
     if not events:
         raise SystemExit("No shock days found - add one to EVENTS.")
-    cur_df = current_risk(rets, px)
+    cur_df, bench_df = current_risk(rets, px)
 
-    data = build_json(px, rets, events, cur_df)
+    data = build_json(px, rets, events, cur_df, bench_df)
     (site / "data" / "data.json").write_text(json.dumps(data, separators=(",", ":")), encoding="utf-8")
 
     focus = pd.Timestamp(args.event) if args.event else max(events)
@@ -520,9 +592,8 @@ def main():
             raise SystemExit(f"{focus.date()} is not a trading day in the data.")
         events[focus] = {"label": f"{focus:%b %d, %Y}", "auto": False}
     xlsx = site / "Manager_Vol_Tracker.xlsx"
-    build_workbook(xlsx, px, rets, focus, events[focus]["label"], cur_df)
-
-    print(f"As of {data['as_of']}: {len(events)} shock day(s) analysed: " + ", ".join(d.strftime("%Y-%m-%d") for d in events))
+    build_workbook(xlsx, px, rets, focus, events[focus]["label"], cur_df, bench_df)
+    print(f"As of {data['as_of']}: {len(events)} shock day(s): " + ", ".join(d.strftime("%Y-%m-%d") for d in events))
     print(f"Wrote {site / 'data' / 'data.json'} and {xlsx}")
 
 

@@ -68,21 +68,26 @@
       </div>
 
       <div class="card table-card">
-        <div class="table-title"><strong>Manager detail</strong><span>Click a column to sort</span></div>
-        <div class="table-scroll"><table id="eventTable" class="data"></table></div>
+        <div class="table-title"><strong><span class="dot Growth"></span> Growth peer group</strong><span>Ranked only against growth peers · click a column to sort</span></div>
+        <div class="table-scroll"><table id="eventGrowth" class="data"></table></div>
       </div>
       <div class="card table-card">
-        <div class="table-title"><strong>Growth vs value averages</strong></div>
-        <div class="table-scroll"><table id="groupTable" class="data"></table></div>
+        <div class="table-title"><strong><span class="dot Value"></span> Value peer group</strong><span>Ranked only against value peers · click a column to sort</span></div>
+        <div class="table-scroll"><table id="eventValue" class="data"></table></div>
       </div>
     </section>
 
     <!-- CURRENT RISK -->
     <section id="risk">
       <div class="section-head"><h2>Current risk</h2></div>
-      <p class="hint">Trailing measures as of each fund's latest price. Mutual fund NAVs post in the evening, so they can lag the ETFs by a day.</p>
+      <p class="hint">Trailing measures as of each fund's latest end-of-day price. Mutual fund NAVs post in the evening, so they can lag the ETFs and indexes by a day. Benchmark-relative figures use each manager's stated benchmark.</p>
       <div class="card table-card">
-        <div class="table-scroll"><table id="riskTable" class="data"></table></div>
+        <div class="table-title"><strong><span class="dot Growth"></span> Growth peer group</strong><span>Sorted by 20-day volatility, lowest first</span></div>
+        <div class="table-scroll"><table id="riskGrowth" class="data"></table></div>
+      </div>
+      <div class="card table-card">
+        <div class="table-title"><strong><span class="dot Value"></span> Value peer group</strong><span>Sorted by 20-day volatility, lowest first</span></div>
+        <div class="table-scroll"><table id="riskValue" class="data"></table></div>
       </div>
     </section>
 
@@ -97,14 +102,14 @@
 
     <section id="vol">
       <div class="section-head"><h2>Volatility over time</h2></div>
-      <p class="hint">20-day rolling volatility, annualized. Dashed line = style benchmark. Vertical markers = shock days.</p>
+      <p class="hint">20-day rolling volatility, annualized. Dashed line = style index. Vertical markers = shock days.</p>
       <div class="grid-2">
         <figure class="card">
-          <figcaption><strong>Growth managers</strong><span>vs Russell 1000 Growth (IWF)</span></figcaption>
+          <figcaption><strong>Growth managers</strong><span>vs Russell 1000 Growth Index (TR)</span></figcaption>
           <div class="chart-box tall"><canvas id="volGrowth"></canvas></div>
         </figure>
         <figure class="card">
-          <figcaption><strong>Value managers</strong><span>vs Russell 1000 Value (IWD)</span></figcaption>
+          <figcaption><strong>Value managers</strong><span>vs Russell 1000 Value Index (TR)</span></figcaption>
           <div class="chart-box tall"><canvas id="volValue"></canvas></div>
         </figure>
       </div>
@@ -115,11 +120,11 @@
       <p class="hint">Cumulative total return over the selected range, with distributions reinvested.</p>
       <div class="grid-2">
         <figure class="card">
-          <figcaption><strong>Growth managers</strong><span>vs Russell 1000 Growth (IWF)</span></figcaption>
+          <figcaption><strong>Growth managers</strong><span>vs Russell 1000 Growth Index (TR)</span></figcaption>
           <div class="chart-box tall"><canvas id="perfGrowth"></canvas></div>
         </figure>
         <figure class="card">
-          <figcaption><strong>Value managers</strong><span>vs Russell 1000 Value (IWD)</span></figcaption>
+          <figcaption><strong>Value managers</strong><span>vs Russell 1000 Value Index (TR)</span></figcaption>
           <div class="chart-box tall"><canvas id="perfValue"></canvas></div>
         </figure>
       </div>
@@ -133,11 +138,31 @@
         <div class="table-scroll"><table id="mapTable" class="data"></table></div>
       </div>
       <div class="card prose">
+        <h3>How managers are benchmarked</h3>
+        <ul>
+          <li><b>Peer groups never mix.</b> Growth managers are ranked only against growth managers, and value against value. Peer rank and peer median are computed separately for each group.</li>
+          <li><b>Each manager is shown against three yardsticks:</b>
+            <ol>
+              <li>the <b>stated benchmark</b> its manager lists (see the table above for the source);</li>
+              <li>the <b>S&amp;P 500</b>, for every manager;</li>
+              <li>its <b>style index</b>: the Russell 1000 Growth for growth peers and the Russell 1000 Value for value peers.</li>
+            </ol>
+            The stated benchmark and the style index are the same for every manager except Oakmark, which names the S&amp;P 500 as its benchmark and the Russell 1000 Value as secondary.</li>
+          <li><b>Benchmarks are the actual total-return indexes</b> (S&amp;P 500 TR, Russell 1000 Growth TR and Russell 1000 Value TR), not ETFs that track them.</li>
+          <li>Beta, correlation, tracking error and up/down capture are measured against the stated benchmark, with beta to the S&amp;P 500 shown alongside.</li>
+        </ul>
+        <h3>Why the public funds are valid stand-ins for volatility tracking</h3>
+        <ul>
+          <li><b>Pricing frequency:</b> every return here is end-of-day, close to close. Mutual funds use the daily NAV struck at 4pm ET, and the two ETFs (GSGO, PVAL) use the 4pm closing price, which normally sits within a few basis points of NAV. No intraday data is used. Daily NAV-based returns are the right basis for volatility, beta and drawdown, because that is how the SMAs' own daily performance is measured.</li>
+          <li><b>Fee drag:</b> each proxy is the lowest-cost share class available (R6, Z, Y or institutional). The fee difference against an SMA is a few basis points a year, about 0.001% a day, which has no measurable effect on volatility or beta.</li>
+          <li><b>Customization, tax-loss harvesting, cash and trade timing:</b> these make an individual SMA account drift from the model, and they are the main reason SMA and fund returns differ. They mainly add tracking error, so they show up as small differences in daily returns, not as a different risk profile. Compare a proxy with your actual SMA returns before relying on it for any single account.</li>
+        </ul>
+        <h3>Definitions</h3>
         <ul>
           <li><b>Prices</b> are total-return adjusted (dividends and capital gains reinvested), so year-end distributions do not show up as losses.</li>
           <li><b>Volatility</b> = standard deviation of daily returns × √252.</li>
           <li><b>Beta</b> = covariance with the index ÷ variance of the index, using daily returns over the trailing year.</li>
-          <li><b>Downside capture</b> = the fund's compounded return on days the benchmark fell ÷ the benchmark's return on those days. Below 1.00 means it lost less.</li>
+          <li><b>Downside capture</b> = the fund's compounded return on days its stated benchmark fell ÷ the benchmark's return on those days. Below 1.00 means it lost less.</li>
           <li><b>Move in own sigmas</b> = shock-day return ÷ the fund's own daily standard deviation over the prior 60 trading days.</li>
           <li><b>Beta-predicted</b> = pre-event beta × the S&amp;P 500's shock-day return. <b>Beyond beta</b> = actual − predicted, the part due to stock and sector choices rather than market exposure.</li>
           <li><b>Shock days</b> are the dates configured in the tracker, plus any day in the last year when the S&amp;P 500 moved at least <span id="sigmaCfg">3</span>σ against its prior 60-day volatility.</li>

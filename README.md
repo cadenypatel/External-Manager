@@ -6,16 +6,23 @@ Tracks daily volatility, beta and shock-day behavior for eight large cap SMA man
 
 ## Managers and proxies
 
-| SMA strategy | Proxy | Style | Benchmark |
+| SMA strategy | Proxy | Peer group | Stated benchmark |
 |---|---|---|---|
-| JPMorgan Large Cap Growth | JLGMX (R6) | Growth | Russell 1000 Growth (IWF) |
-| Goldman Sachs Strategic Large Growth | GSGO (ETF, successor to the GS Strategic Growth Fund) | Growth | IWF |
-| Alger Focus Equity | ALZFX (Z) | Growth | IWF |
-| Cantor Fitzgerald LC Focused | FICIX (R6) | Growth | IWF |
-| Putnam US LCV Equity Concentrated | PVAL (ETF) | Value | Russell 1000 Value (IWD) |
-| MFS Large Cap Value | MEIKX (R6) | Value | IWD |
-| Oakmark Large Cap Value | OANMX (Institutional) | Value | IWD |
-| BNYM Newton Dynamic Value | DRGYX (Y) | Value | IWD |
+| JPMorgan Large Cap Growth | JLGMX (R6) | Growth | Russell 1000 Growth |
+| Goldman Sachs Strategic Large Growth | GSGO (ETF, successor to the GS Strategic Growth Fund) | Growth | Russell 1000 Growth |
+| Alger Focus Equity | ALZFX (Z) | Growth | Russell 1000 Growth |
+| Cantor Fitzgerald LC Focused | FICIX (R6) | Growth | Russell 1000 Growth |
+| Putnam US LCV Equity Concentrated | PVAL (ETF) | Value | Russell 1000 Value |
+| MFS Large Cap Value | MEIKX (R6) | Value | Russell 1000 Value |
+| Oakmark Large Cap Value | OANMX (Institutional) | Value | S&P 500 (Russell 1000 Value secondary) |
+| BNYM Newton Dynamic Value | DRGYX (Y) | Value | Russell 1000 Value |
+
+## Benchmarking
+
+- Peer groups never mix: growth managers are ranked only against growth peers, and value managers only against value peers.
+- Each manager is shown against its **stated benchmark** (the table above), the **S&P 500**, and its **style index** (Russell 1000 Growth or Russell 1000 Value).
+- Benchmarks are the actual total-return indexes (S&P 500 TR, Russell 1000 Growth TR, Russell 1000 Value TR), not ETFs.
+- All returns are end-of-day: NAV for mutual funds and the 4pm closing price for the two ETFs. No intraday data is used.
 
 ## What it measures
 

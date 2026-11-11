@@ -149,8 +149,9 @@
 
   // ---------- helpers ----------
   const fundsBy = (style) => DATA.funds.filter((f) => f.style === style);
-  const managerOf = (tkr) => (DATA.funds.find((f) => f.ticker === tkr) || {}).manager || DATA.benchmarks[tkr] || tkr;
-  const benchFor = (style) => (style === "Growth" ? "IWF" : "IWD");
+  const benchFor = (style) => DATA.style_index[style];
+  const idxShort = (t) => (DATA.indexes[t] ? DATA.indexes[t].short : t);
+  const idxName = (t) => (DATA.indexes[t] ? DATA.indexes[t].name : t);
 
   // ---------- shock day ----------
   function renderEventSelect() {
@@ -169,11 +170,11 @@
     const g = ev.groups.find((x) => x.style === "Growth");
     const v = ev.groups.find((x) => x.style === "Value");
     const tiles = [
-      ["S&P 500", pct(m.spy_ret), `${num(m.spy_sigma60, 1)}σ vs prior 60d · ${num(m.spy_sigma1y, 1)}σ vs 1y`],
-      ["Russell 1000 Growth", pct(m.iwf_ret), "IWF"],
-      ["Russell 1000 Value", pct(m.iwd_ret), "IWD"],
-      ["Growth managers (avg)", pct(g.event_ret), `${pct(g.excess_bmk, 2, true)} vs IWF`],
-      ["Value managers (avg)", pct(v.event_ret), `${pct(v.excess_bmk, 2, true)} vs IWD`],
+      ["S&P 500 Index (TR)", pct(m.spy_ret), `${num(m.spy_sigma60, 1)}σ vs prior 60d · ${num(m.spy_sigma1y, 1)}σ vs 1y`],
+      ["Russell 1000 Growth (TR)", pct(m.r1g_ret), "Growth style index"],
+      ["Russell 1000 Value (TR)", pct(m.r1v_ret), "Value style index"],
+      ["Growth peers (avg)", pct(g.event_ret), `${pct(g.excess_style, 2, true)} vs R1000 Growth`],
+      ["Value peers (avg)", pct(v.event_ret), `${pct(v.excess_style, 2, true)} vs R1000 Value`],
     ];
     document.getElementById("marketTiles").innerHTML = tiles
       .map(([k, val, s]) => `<div class="tile"><div class="k">${k}</div><div class="v">${val}</div><div class="s">${s}</div></div>`)
@@ -188,8 +189,6 @@
     const c = Object.fromEntries(ev.correlations.map((x) => [x.x, x.value]));
     const rows = ev.rows;
     const isDown = ev.market.spy_ret < 0;
-    const best = [...rows].sort((a, b) => b.event_ret - a.event_ret)[0];
-    const worst = [...rows].sort((a, b) => a.event_ret - b.event_ret)[0];
     const bestAlpha = [...rows].sort((a, b) => b.alpha_day - a.alpha_day)[0];
     const g = ev.groups.find((x) => x.style === "Growth");
     const v = ev.groups.find((x) => x.style === "Value");
@@ -201,8 +200,14 @@
       `the correlation between volatility and the day's return was ${num(volR)} (${strength(volR)}), and for beta it was ${num(betaR)} (${strength(betaR)}).</p>`);
     p.push(`<p>Growth managers went in with ${pct(g.vol60_pre, 1)} volatility and a beta of ${num(g.beta_spy_pre)}, and returned ${pct(g.event_ret)}. ` +
       `Value managers went in with ${pct(v.vol60_pre, 1)} volatility and a beta of ${num(v.beta_spy_pre)}, and returned ${pct(v.event_ret)}.</p>`);
-    p.push(`<p>Best: <b>${esc(best.manager)}</b> (${best.ticker}, ${pct(best.event_ret)}). Worst: <b>${esc(worst.manager)}</b> (${worst.ticker}, ${pct(worst.event_ret)}). ` +
-      `After adjusting for beta, every manager was within ±${pct(maxAbsAlpha, 1)} of its beta-predicted return. The best beyond beta was ${esc(bestAlpha.manager)} at ${pct(bestAlpha.alpha_day, 2, true)}.</p>`);
+    const peerLine = (style) => {
+      const rs = rows.filter((r) => r.style === style).sort((a, b) => b.event_ret - a.event_ret);
+      const top = rs[0], bot = rs[rs.length - 1];
+      return `${style} peers: best was <b>${esc(top.manager)}</b> (${pct(top.event_ret)}, ${pct(top.excess_stated, 2, true)} vs its ${idxShort(top.stated_benchmark)} benchmark), ` +
+        `worst was <b>${esc(bot.manager)}</b> (${pct(bot.event_ret)}, ${pct(bot.excess_stated, 2, true)} vs ${idxShort(bot.stated_benchmark)}).`;
+    };
+    p.push(`<p>${peerLine("Growth")}<br>${peerLine("Value")}</p>`);
+    p.push(`<p>After adjusting for beta, every manager was within ±${pct(maxAbsAlpha, 1)} of its beta-predicted return. The best beyond beta was ${esc(bestAlpha.manager)} at ${pct(bestAlpha.alpha_day, 2, true)}.</p>`);
     document.getElementById("finding").innerHTML = p.join("");
   }
 
@@ -231,7 +236,9 @@
             callbacks: {
               title: (items) => items[0].raw.row.manager,
               label: (it) => [`${xTitle}: ${xFmt(it.raw.x)}`, `Shock-day return: ${pct(it.raw.y)}`,
-                `vs ${it.raw.row.benchmark}: ${pct(it.raw.row.excess_bmk, 2, true)}`, `Beyond beta: ${pct(it.raw.row.alpha_day, 2, true)}`],
+                `vs ${idxShort(it.raw.row.stated_benchmark)} (stated bmk): ${pct(it.raw.row.excess_stated, 2, true)}`,
+                `Rank in ${it.raw.row.style.toLowerCase()} peers: ${it.raw.row.event_peer_rank} of ${it.raw.row.peer_count}`,
+                `Beyond beta: ${pct(it.raw.row.alpha_day, 2, true)}`],
             },
           },
         },
@@ -248,7 +255,7 @@
       borderWidth: 2, pointRadius: 0, pointHoverRadius: 4, tension: 0, spanGaps: true,
     }));
     const b = benchFor(style);
-    ds.push({ label: b + " (benchmark)", data: w.series[b], borderColor: t.bench, backgroundColor: t.bench, borderDash: [5, 4],
+    ds.push({ label: idxShort(b) + " (style index)", data: w.series[b], borderColor: t.bench, backgroundColor: t.bench, borderDash: [5, 4],
               borderWidth: 2, pointRadius: 0, pointHoverRadius: 4, pointStyle: "line" });
     const shockIdx = w.offsets.indexOf(0);
     make(id, {
@@ -288,12 +295,14 @@
         const cls = [c.txt ? "txt" : "", opts.sortable ? "sortable" : "", c.key === sortKey ? "sorted" + (asc ? " asc" : "") : ""].join(" ");
         return `<th class="${cls}" data-k="${c.key}" ${c.title ? `title="${esc(c.title)}"` : ""}>${c.label}</th>`;
       }).join("") + "</tr></thead>";
-      const body = "<tbody>" + rs.map((r) => `<tr class="${r.style === "Benchmark" ? "bench" : ""}">` + cols.map((c) => {
+      const tr = (r, extra = "") => `<tr class="${r.style === "Benchmark" ? "bench" : ""} ${extra}">` + cols.map((c) => {
         const v = r[c.key];
+        if (v === undefined && r.__footer) return "<td></td>";
         const out = c.render ? c.render(v, r) : c.fmt ? c.fmt(v) : esc(v ?? "");
         const cls = [c.txt ? "txt" : "", c.color && typeof v === "number" ? (v < 0 ? "neg" : v > 0 ? "pos" : "") : ""].join(" ");
         return `<td class="${cls}">${out}</td>`;
-      }).join("") + "</tr>").join("") + "</tbody>";
+      }).join("") + "</tr>";
+      const body = "<tbody>" + rs.map((r) => tr(r)).join("") + (opts.footer || []).map((r) => tr({ ...r, __footer: true }, "footer")).join("") + "</tbody>";
       el.innerHTML = head + body;
       if (opts.sortable) {
         el.querySelectorAll("th").forEach((th) => th.addEventListener("click", () => {
@@ -305,68 +314,99 @@
     };
     draw();
   }
-  const managerCell = (v, r) => `${esc(v)}<br><span class="tag">${r.style !== "Benchmark" ? `<span class="dot ${r.style}"></span>` : ""}${r.ticker}${r.style !== "Benchmark" ? " · " + r.style : ""}</span>`;
+  const managerCell = (v, r) => {
+    if (r.__footer) return `<b>${esc(v)}</b>`;
+    if (r.style === "Benchmark") return `${esc(v)}`;
+    const f = DATA.funds.find((x) => x.ticker === r.ticker) || {};
+    return `${esc(v)}<br><span class="tag"><span class="dot ${r.style}"></span>${r.ticker} · ${f.vehicle || ""}</span>`;
+  };
+  const rankCell = (v, r) => (v == null ? "" : `${v} of ${r.peer_count}`);
+  const bmkCell = (v) => (v ? `<span title="${esc(idxName(v))}">${esc(idxShort(v))}</span>` : "");
 
   function renderEventTable(ev) {
     const P = (v) => pct(v), Ps = (v) => pct(v, 2, true), R = (v) => num(v);
-    table(document.getElementById("eventTable"), [
+    const cols = [
       { key: "manager", label: "Manager", txt: true, render: managerCell },
+      { key: "stated_benchmark", label: "Stated benchmark", txt: true, render: bmkCell, title: "The primary benchmark the manager lists" },
       { key: "event_ret", label: "Shock-day return", fmt: P, color: true },
-      { key: "bench_ret", label: "Benchmark return", fmt: P },
-      { key: "excess_bmk", label: "vs benchmark", fmt: Ps, color: true },
+      { key: "excess_stated", label: "vs stated bmk", fmt: Ps, color: true },
       { key: "excess_spy", label: "vs S&P 500", fmt: Ps, color: true },
+      { key: "excess_style", label: "vs style index", fmt: Ps, color: true, title: "vs Russell 1000 Growth (growth peers) or Russell 1000 Value (value peers)" },
+      { key: "event_peer_rank", label: "Peer rank", render: rankCell, title: "Rank within this peer group only (1 = best)" },
+      { key: "event_vs_peer", label: "vs peer median", fmt: Ps, color: true },
       { key: "sigma_own", label: "Move in own σ", fmt: (v) => num(v, 1) + "σ", title: "Shock-day return ÷ the fund's own prior 60-day daily standard deviation" },
       { key: "vol20_pre", label: "Pre vol 20d", fmt: (v) => pct(v, 1) },
       { key: "vol60_pre", label: "Pre vol 60d", fmt: (v) => pct(v, 1) },
       { key: "vol1y_pre", label: "Pre vol 1y", fmt: (v) => pct(v, 1) },
-      { key: "beta_spy_pre", label: "Beta vs S&P", fmt: R },
-      { key: "beta_bmk_pre", label: "Beta vs bmk", fmt: R },
-      { key: "down_cap_pre", label: "Downside capture", fmt: R },
+      { key: "beta_spy_pre", label: "Beta vs S&P 500", fmt: R },
+      { key: "beta_stated_pre", label: "Beta vs stated bmk", fmt: R },
+      { key: "down_cap_pre", label: "Downside capture (stated bmk)", fmt: R },
       { key: "pred_ret", label: "Beta-predicted", fmt: P },
       { key: "alpha_day", label: "Beyond beta", fmt: Ps, color: true, title: "Actual − beta-predicted return" },
       { key: "since_event", label: "Since shock", fmt: Ps, color: true },
-    ], ev.rows, { sortable: true, sortKey: "event_ret", asc: false });
-
-    table(document.getElementById("groupTable"), [
-      { key: "style", label: "Group", txt: true, render: (v) => `<span class="tag" style="font-size:13px;color:inherit"><span class="dot ${v}"></span>${v} managers</span>` },
-      { key: "event_ret", label: "Shock-day return", fmt: (v) => pct(v), color: true },
-      { key: "excess_bmk", label: "vs benchmark", fmt: (v) => pct(v, 2, true), color: true },
-      { key: "vol60_pre", label: "Pre vol 60d", fmt: (v) => pct(v, 1) },
-      { key: "beta_spy_pre", label: "Beta vs S&P", fmt: (v) => num(v) },
-      { key: "down_cap_pre", label: "Downside capture", fmt: (v) => num(v) },
-      { key: "alpha_day", label: "Beyond beta", fmt: (v) => pct(v, 2, true), color: true },
-      { key: "since_event", label: "Since shock", fmt: (v) => pct(v, 2, true), color: true },
-    ], ev.groups);
+    ];
+    const m = ev.market;
+    ["Growth", "Value"].forEach((style) => {
+      const g = ev.groups.find((x) => x.style === style);
+      const si = DATA.style_index[style];
+      const footer = [
+        { manager: `${style} peer median`, event_ret: g.event_ret_median },
+        { manager: `${style} peer average`, event_ret: g.event_ret, excess_stated: g.excess_stated, excess_spy: g.excess_spy,
+          excess_style: g.excess_style, vol60_pre: g.vol60_pre, beta_spy_pre: g.beta_spy_pre, down_cap_pre: g.down_cap_pre,
+          alpha_day: g.alpha_day, since_event: g.since_event },
+        { manager: idxName(si), event_ret: g.style_index_ret },
+        { manager: idxName(DATA.sp500), event_ret: m.spy_ret },
+      ];
+      table(document.getElementById("event" + style), cols, ev.rows.filter((r) => r.style === style),
+        { sortable: true, sortKey: "event_ret", asc: false, footer });
+    });
   }
 
   function renderRisk() {
     const P = (v) => pct(v), R = (v) => num(v);
-    table(document.getElementById("riskTable"), [
+    const cols = [
       { key: "manager", label: "Manager", txt: true, render: managerCell },
-      { key: "last_date", label: "Last price", fmt: (v) => shortDate(v) },
+      { key: "stated_benchmark", label: "Stated benchmark", txt: true, render: bmkCell },
+      { key: "pricing_basis", label: "Pricing basis", txt: true },
+      { key: "last_date", label: "Last price", fmt: (v) => (v ? shortDate(v) : "") },
       { key: "ret_1d", label: "1D", fmt: P, color: true },
       { key: "ret_1m", label: "1M", fmt: P, color: true },
+      { key: "ret_1m_peer_rank", label: "1M peer rank", render: rankCell },
       { key: "ret_3m", label: "3M", fmt: P, color: true },
       { key: "ret_ytd", label: "YTD", fmt: P, color: true },
       { key: "ret_1y", label: "1Y", fmt: P, color: true },
       { key: "vol20", label: "Vol 20d", fmt: (v) => pct(v, 1) },
+      { key: "vol20_peer_rank", label: "Vol 20d peer rank", render: rankCell, title: "1 = lowest volatility in this peer group" },
       { key: "vol60", label: "Vol 60d", fmt: (v) => pct(v, 1) },
       { key: "vol1y", label: "Vol 1y", fmt: (v) => pct(v, 1) },
-      { key: "beta_spy", label: "Beta vs S&P", fmt: R },
-      { key: "beta_bmk", label: "Beta vs bmk", fmt: R },
-      { key: "corr_bmk", label: "Corr vs bmk", fmt: R },
-      { key: "te_bmk", label: "Tracking error", fmt: (v) => pct(v, 1) },
+      { key: "beta_spy", label: "Beta vs S&P 500", fmt: R },
+      { key: "beta_stated", label: "Beta vs stated bmk", fmt: R },
+      { key: "corr_stated", label: "Corr vs stated bmk", fmt: R },
+      { key: "te_stated", label: "Tracking error vs stated bmk", fmt: (v) => pct(v, 1) },
       { key: "up_cap", label: "Upside capture", fmt: R },
       { key: "down_cap", label: "Downside capture", fmt: R },
       { key: "max_dd_1y", label: "Max drawdown 1y", fmt: P },
-    ], DATA.current, { sortable: true, sortKey: "vol20", asc: false, pinBench: true });
+    ];
+    const benchRow = (t) => ({ ...DATA.current_benchmarks.find((b) => b.ticker === t), style: "Benchmark", stated_benchmark: "" });
+    ["Growth", "Value"].forEach((style) => {
+      const rs = DATA.current.filter((r) => r.style === style);
+      const med = (k) => { const v = rs.map((r) => r[k]).filter((x) => x != null).sort((a, b) => a - b); const n = v.length; return n ? (n % 2 ? v[(n - 1) / 2] : (v[n / 2 - 1] + v[n / 2]) / 2) : null; };
+      const footer = [
+        { manager: `${style} peer median`, ...Object.fromEntries(["ret_1d", "ret_1m", "ret_3m", "ret_ytd", "ret_1y", "vol20", "vol60", "vol1y", "beta_spy", "max_dd_1y"].map((k) => [k, med(k)])) },
+        benchRow(DATA.style_index[style]),
+        benchRow(DATA.sp500),
+      ];
+      table(document.getElementById("risk" + style), cols, rs, { sortable: true, sortKey: "vol20", asc: true, footer });
+    });
 
     table(document.getElementById("mapTable"), [
       { key: "manager", label: "SMA strategy", txt: true },
+      { key: "style", label: "Peer group", txt: true, render: (v) => `<span class="tag" style="color:inherit;font-size:13px"><span class="dot ${v}"></span>${v}</span>` },
       { key: "ticker", label: "Proxy", txt: true },
-      { key: "style", label: "Style", txt: true, render: (v) => `<span class="tag" style="color:inherit;font-size:13px"><span class="dot ${v}"></span>${v}</span>` },
       { key: "description", label: "Proxy fund", txt: true },
-      { key: "benchmark_name", label: "Style benchmark", txt: true },
+      { key: "pricing_basis", label: "Pricing basis", txt: true },
+      { key: "stated_benchmark", label: "Stated benchmark", txt: true, render: (v) => esc(idxName(v)) },
+      { key: "source", label: "Benchmark source", txt: true },
     ], DATA.funds);
   }
 
@@ -391,7 +431,7 @@
       borderWidth: 2, pointRadius: 0, pointHoverRadius: 4, tension: 0, spanGaps: true,
     }));
     const b = benchFor(style);
-    ds.push({ label: b + " (benchmark)", data: seriesFor(b), borderColor: t.bench, backgroundColor: t.bench, borderDash: [5, 4],
+    ds.push({ label: idxShort(b) + " (style index)", data: seriesFor(b), borderColor: t.bench, backgroundColor: t.bench, borderDash: [5, 4],
               borderWidth: 2, pointRadius: 0, pointHoverRadius: 4, pointStyle: "line", spanGaps: true });
     const evDates = DATA.events.map((e) => e.date).filter((d) => labels.includes(d));
     make(id, {
