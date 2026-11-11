@@ -733,7 +733,7 @@
     const ordered = [...flagged, ...rest];
     const flagText = (r) => r.flag === "Up" ? `▲ +${num(r.weight_change, 2)} pp` : r.flag === "Down" ? `▼ ${num(r.weight_change, 2)} pp` : r.flag;
     const header = c
-      ? `Report ${fmtDate(c.to)} vs ${fmtDate(c.from)}${c.fund_flow_share_change != null ? ` · fund-wide share change ${pct(c.fund_flow_share_change, 1, true)}` : ""}`
+      ? `Report ${fmtDate(c.to)} vs ${fmtDate(c.from)}`
       : `One report on file (${fmtDate(h.as_of)}). Changes appear once Eikon has a second report.`;
     return `<div class="card holdings-card ${flagged.length ? "flagged" : ""}">
       <div class="hc-head"><strong>${esc(f.manager)}</strong>
@@ -741,11 +741,10 @@
       <div class="hint hc-sub">${f.ticker} · ${h.n_holdings} holdings · ${header}${h.source ? ` · Source: ${esc(h.source)}` : ""}</div>
       ${primary ? `<div class="hc-primary">Biggest change: <b>${esc(primary.name)}</b>, ${esc(flagText(primary))}${primary.flag === "Sold out" ? ` (was ${W(primary.weight_prev)})` : primary.flag === "New position" ? ` at ${W(primary.weight_now)}` : ""}</div>` : ""}
       <div class="table-scroll hc-table"><table class="data"><thead><tr>
-        <th class="txt">Security</th><th>Weight</th><th>${changeLabel}</th><th>Shares chg</th><th class="txt">Flag</th></tr></thead><tbody>` +
+        <th class="txt">Security</th><th>Weight</th><th>${changeLabel}</th><th class="txt">Flag</th></tr></thead><tbody>` +
       ordered.map((r) => `<tr class="${r === primary ? "primary" : r.flag ? "flagged-row" : ""}">
         <td class="txt">${esc(r.name)}</td><td>${W(r.weight_now)}</td>
         <td class="${r.weight_change == null ? "" : r.weight_change < 0 ? "neg" : r.weight_change > 0 ? "pos" : ""}">${r.weight_change == null ? "–" : num(r.weight_change, 2, true) + " pp"}</td>
-        <td>${r.share_change == null ? "–" : pct(r.share_change, 1, true)}</td>
         <td class="txt">${r.flag ? `<span class="flag">${esc(flagText(r))}</span>` : ""}</td></tr>`).join("") +
       `</tbody></table></div></div>`;
   }
