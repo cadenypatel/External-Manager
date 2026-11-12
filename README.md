@@ -77,12 +77,9 @@ For internal research and monitoring. Not investment advice.
 
 ## Daily email report
 
-`.github/workflows/daily-email.yml` emails an overview of the public dashboard every morning at 8:31 Central Time: a market snapshot, notable S&P 500 days, growth and value peer tables, and the latest shock day. It uses Yahoo data only, never Eikon. It needs three repository secrets (Settings → Secrets and variables → Actions):
+`.github/workflows/daily-email.yml` runs every morning at 8:31 Central Time. It works the same way as RWAPI: it opens a GitHub issue labeled `daily-report` that @mentions you, and GitHub emails it to your account's notification address. No email passwords are involved. The issue covers a market snapshot, notable S&P 500 days, the growth and value peer tables and the latest shock day, using Yahoo data only (never Eikon). It's built from completed sessions only.
 
-| Secret | Value |
-|---|---|
-| `SMTP_USER` | The Gmail address that sends the report |
-| `SMTP_PASSWORD` | A Gmail **app password** for that account (Google Account → Security → 2-Step Verification → App passwords) |
-| `MAIL_TO` | Recipient address(es), comma-separated |
-
-To test it immediately, go to **Actions → Daily email report → Run workflow**. To preview locally without sending, run `python tracker/daily_report.py --out report.html`.
+- **To get it in a second inbox,** add a forwarding rule in the receiving mailbox, for example Gmail → Settings → Forwarding to your Outlook address.
+- **To test it now,** go to **Actions → Daily email report → Run workflow**.
+- **To preview it locally,** run `python tracker/daily_report.py --issue-md report.md`.
+- **Visibility:** the repo is public, so the report issues are public too. They contain only the same public data the website shows.

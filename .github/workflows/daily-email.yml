@@ -1,12 +1,12 @@
 name: Daily email report (8:31 CT)
 
-# Emails an overview of the PUBLIC dashboard every morning at 8:31 Central Time.
-# Data: Yahoo Finance only (never Eikon). Mail settings come from repository secrets:
-#   SMTP_USER      Gmail address that sends the report
-#   SMTP_PASSWORD  Gmail app password for that account
-#   MAIL_TO        recipient address(es), comma-separated
+# Every morning at 8:31 Central Time this opens a GitHub issue with an overview of the PUBLIC
+# dashboard and @mentions the repo owner, so GitHub emails it to the owner's notification
+# address - the same method as RWAPI. No email passwords or app passwords needed.
+# Data: Yahoo Finance only (never Eikon).
+#
 # GitHub cron is UTC with no daylight saving, so both 13:00 and 14:00 UTC are scheduled and
-# tracker/wait_until.py keeps only the right one and waits until 8:31 CT.
+# tracker/wait_until.py keeps only today's correct slot and waits until 8:31 CT.
 
 on:
   schedule:
@@ -16,13 +16,14 @@ on:
 
 permissions:
   contents: read
+  issues: write     # the report is opened as an issue; GitHub emails the @mentioned owner
 
 concurrency:
   group: daily-email
   cancel-in-progress: false
 
 jobs:
-  email:
+  report:
     runs-on: ubuntu-latest
     timeout-minutes: 75
     steps:
@@ -42,10 +43,16 @@ jobs:
         if: steps.gate.outputs.send == 'true'
         run: pip install "yfinance>=0.2.66" "pandas>=2.2" "numpy>=1.26" "openpyxl>=3.1"
 
-      - name: Build and send report
+      - name: Build report
+        if: steps.gate.outputs.send == 'true'
+        run: python tracker/daily_report.py --issue-md report.md --mention "${{ github.repository_owner }}"
+
+      - name: Open report issue (GitHub emails you)
         if: steps.gate.outputs.send == 'true'
         env:
-          SMTP_USER: ${{ secrets.SMTP_USER }}
-          SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
-          MAIL_TO: ${{ secrets.MAIL_TO }}
-        run: python tracker/daily_report.py --send
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh label create daily-report --color 1F3864 --description "Daily 8:31 CT report" --force >/dev/null 2>&1 || true
+          TITLE=$(head -n 1 report.md)
+          tail -n +2 report.md > body.md
+          gh issue create --title "$TITLE" --body-file body.md --label daily-report

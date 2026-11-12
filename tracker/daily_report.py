@@ -216,6 +216,70 @@ def render(d):
                      f"<body style='margin:0'>{body}</body></html>")
 
 
+def render_md(d, mention=None):
+    """Markdown version for a GitHub issue - GitHub emails it to the repo owner (same method as RWAPI)."""
+    last, cur, bench, rets = d["last"], d["cur"], d["bench"], d["rets"]
+    idx = {r["ticker"]: r for r in bench.to_dict("records")}
+    sp, g, v = idx[M.SP500], idx[M.R1G], idx[M.R1V]
+    arrow = lambda x: "" if x is None or (isinstance(x, float) and np.isnan(x)) or x == 0 else ("▲ " if x > 0 else "▼ ")
+    P = lambda x: arrow(x) + pct(x, sign=True)
+    L = []
+    if mention:
+        L.append(f"@{mention} — daily overview of the public dashboard.\n")
+    L.append(f"**Data as of {fdate(last)} close** · lookback 1 year · [Open the dashboard]({SITE_URL})\n")
+    L.append(f"> The S&P 500 returned **{pct(sp['ret_1d'], sign=True)}** ({num(d['sig'].get(last), 1, True)}σ vs its 1-year volatility). "
+             f"Russell 1000 Growth {pct(g['ret_1d'], sign=True)}, Russell 1000 Value {pct(v['ret_1d'], sign=True)}.\n")
+
+    L.append("### Market snapshot\n")
+    L.append("| Index (total return) | 1D | 1M | YTD | Vol 20d | Vol 1Y | Max DD 1Y |")
+    L.append("|:--|--:|--:|--:|--:|--:|--:|")
+    for r in (sp, g, v):
+        L.append(f"| {r['manager']} | {P(r['ret_1d'])} | {P(r['ret_1m'])} | {P(r['ret_ytd'])} | {pct(r['vol20'], 1)} | {pct(r['vol1y'], 1)} | {pct(r['max_dd_1y'])} |")
+
+    L.append("\n### Notable S&P 500 days, last 3 months\n")
+    if len(d["notable"]):
+        L.append("| Date | S&P 500 | Move vs 1Y volatility |")
+        L.append("|:--|--:|--:|")
+        for ts, s in d["notable"].head(8).items():
+            L.append(f"| {fdate(ts)} | {P(rets.at[ts, M.SP500])} | {num(s, 1, True)}σ |")
+    else:
+        L.append("No S&P 500 day of 2σ or more in the last three months.")
+
+    for style, mark in (("Growth", "🔵"), ("Value", "🟠")):
+        L.append(f"\n### {mark} {style} peer group\n")
+        L.append("_Sorted by 1-year volatility, lowest first. Down capture vs each manager's stated benchmark._\n")
+        L.append("| Manager | 1D | 1M | YTD | Vol 1Y | Beta vs S&P | Down capture | Max DD 1Y |")
+        L.append("|:--|--:|--:|--:|--:|--:|--:|--:|")
+        for r in cur[cur["style"] == style].sort_values("vol1y").to_dict("records"):
+            L.append(f"| **{r['manager']}** ({r['ticker']}) | {P(r['ret_1d'])} | {P(r['ret_1m'])} | {P(r['ret_ytd'])} | "
+                     f"{pct(r['vol1y'], 1)} | {num(r['beta_spy'])} | {num(r['down_cap'])} | {pct(r['max_dd_1y'])} |")
+        si = idx[M.STYLE_INDEX[style]]
+        L.append(f"| _{si['manager']}_ | _{P(si['ret_1d'])}_ | _{P(si['ret_1m'])}_ | _{P(si['ret_ytd'])}_ | _{pct(si['vol1y'], 1)}_ | _{num(si['beta_spy'])}_ | – | _{pct(si['max_dd_1y'])}_ |")
+
+    ev, m = d["ev_df"], d["market"]
+    gG = next(x for x in d["groups"] if x["style"] == "Growth")
+    gV = next(x for x in d["groups"] if x["style"] == "Value")
+    L.append("\n### Latest shock day\n")
+    L.append(f"**{fdate(d['ev_date'])}**: S&P 500 {pct(m['spy_ret'])} ({num(d['ev_sigma'], 1, True)}σ vs 1Y volatility). "
+             f"Growth peers averaged {pct(gG['event_ret'])} ({pct(gG['excess_style'], sign=True)} vs Russell 1000 Growth); "
+             f"value peers averaged {pct(gV['event_ret'])} ({pct(gV['excess_style'], sign=True)} vs Russell 1000 Value).\n")
+    for style in ("Growth", "Value"):
+        s = ev[ev["style"] == style].sort_values("event_ret", ascending=False)
+        if len(s):
+            b, w = s.iloc[0], s.iloc[-1]
+            L.append(f"- **{style}:** best {b['manager']} ({pct(b['event_ret'])}, {pct(b['excess_stated'], sign=True)} vs its benchmark); "
+                     f"worst {w['manager']} ({pct(w['event_ret'])}, {pct(w['excess_stated'], sign=True)}).")
+    if len(ev) > 2:
+        vc, bc = ev["vol1y_pre"].corr(ev["event_ret"]), ev["beta_spy_pre"].corr(ev["event_ret"])
+        L.append(f"- Pre-shock 1Y volatility vs the day's return: correlation {num(vc)}; beta vs the day's return: {num(bc)}."
+                 + (" Lower-volatility managers held up better." if (m["spy_ret"] < 0 and vc < -0.4) else ""))
+
+    L.append("\n---\n<sub>Public mutual fund and ETF proxies for the SMA strategies; end-of-day total returns from Yahoo Finance. "
+             "No Eikon or other licensed data. For internal research and monitoring. Not investment advice.</sub>")
+    title = f"Equity Manager Tracker · {fdate(last)} · S&P 500 {pct(sp['ret_1d'], sign=True)}"
+    return title, "\n".join(L)
+
+
 def send(subject, html_body):
     user, pwd, to = os.environ.get("SMTP_USER"), os.environ.get("SMTP_PASSWORD"), os.environ.get("MAIL_TO")
     if not (user and pwd and to):
@@ -236,10 +300,22 @@ def send(subject, html_body):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--out", help="also save the HTML to this file")
-    ap.add_argument("--send", action="store_true")
+    ap.add_argument("--send", action="store_true", help="email via SMTP (optional; needs SMTP_* secrets)")
+    ap.add_argument("--issue-md", help="write a Markdown report (first line = title) for a GitHub issue")
+    ap.add_argument("--mention", default=os.environ.get("REPORT_MENTION"), help="GitHub username to @mention")
     args = ap.parse_args()
     px = M.fetch_prices(M.all_tickers(), M.HISTORY_START)
-    subject, body = render(build(px))
+    # Use completed sessions only: at 8:31 CT the market has just opened, so drop today's partial bar.
+    from zoneinfo import ZoneInfo
+    now_ny = dt.datetime.now(ZoneInfo("America/New_York"))
+    if px.index[-1].date() == now_ny.date() and (now_ny.hour, now_ny.minute) < (16, 30):
+        px = px.iloc[:-1]
+    data = build(px)
+    if args.issue_md:
+        title, md = render_md(data, args.mention)
+        Path(args.issue_md).write_text(f"{title}\n{md}\n", encoding="utf-8")
+        print(f"Saved {args.issue_md}  ({title})")
+    subject, body = render(data)
     if args.out:
         Path(args.out).write_text(body, encoding="utf-8")
         print(f"Saved {args.out}  ({subject})")
