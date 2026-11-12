@@ -216,9 +216,11 @@ def render(d):
                      f"<body style='margin:0'>{body}</body></html>")
 
 
-def render_md(d, mention=None):
-    """Markdown version for a GitHub issue - GitHub emails it to the repo owner (same method as RWAPI)."""
+def render_md(d, mention=None, img_base=None):
+    """Markdown version for a GitHub issue - GitHub emails it to the repo owner (same method as RWAPI).
+    img_base: URL folder holding the day's chart PNGs (see report_charts.py); omitted = no charts."""
     last, cur, bench, rets = d["last"], d["cur"], d["bench"], d["rets"]
+    img = (lambda name, alt: f"![{alt}]({img_base.rstrip('/')}/{name})") if img_base else (lambda name, alt: "")
     idx = {r["ticker"]: r for r in bench.to_dict("records")}
     sp, g, v = idx[M.SP500], idx[M.R1G], idx[M.R1V]
     arrow = lambda x: "" if x is None or (isinstance(x, float) and np.isnan(x)) or x == 0 else ("▲ " if x > 0 else "▼ ")
@@ -256,6 +258,14 @@ def render_md(d, mention=None):
         si = idx[M.STYLE_INDEX[style]]
         L.append(f"| _{si['manager']}_ | _{P(si['ret_1d'])}_ | _{P(si['ret_1m'])}_ | _{P(si['ret_ytd'])}_ | _{pct(si['vol1y'], 1)}_ | _{num(si['beta_spy'])}_ | – | _{pct(si['max_dd_1y'])}_ |")
 
+    if img_base:
+        L.append("\n### Volatility over time\n")
+        L.append(img("vol_growth.png", "Growth managers: 20-day rolling volatility"))
+        L.append(img("vol_value.png", "Value managers: 20-day rolling volatility"))
+        L.append("\n### Performance\n")
+        L.append(img("perf_growth.png", "Growth managers: cumulative total return"))
+        L.append(img("perf_value.png", "Value managers: cumulative total return"))
+
     ev, m = d["ev_df"], d["market"]
     gG = next(x for x in d["groups"] if x["style"] == "Growth")
     gV = next(x for x in d["groups"] if x["style"] == "Value")
@@ -273,6 +283,12 @@ def render_md(d, mention=None):
         vc, bc = ev["vol1y_pre"].corr(ev["event_ret"]), ev["beta_spy_pre"].corr(ev["event_ret"])
         L.append(f"- Pre-shock 1Y volatility vs the day's return: correlation {num(vc)}; beta vs the day's return: {num(bc)}."
                  + (" Lower-volatility managers held up better." if (m["spy_ret"] < 0 and vc < -0.4) else ""))
+    if img_base:
+        L.append("")
+        L.append(img("scatter_vol.png", "Pre-shock volatility vs shock-day return"))
+        L.append(img("scatter_beta.png", "Pre-shock beta vs shock-day return"))
+        L.append(img("path_growth.png", "Growth managers: path through the shock"))
+        L.append(img("path_value.png", "Value managers: path through the shock"))
 
     L.append("\n---\n<sub>Public mutual fund and ETF proxies for the SMA strategies; end-of-day total returns from Yahoo Finance. "
              "No Eikon or other licensed data. For internal research and monitoring. Not investment advice.</sub>")
@@ -303,6 +319,9 @@ def main():
     ap.add_argument("--send", action="store_true", help="email via SMTP (optional; needs SMTP_* secrets)")
     ap.add_argument("--issue-md", help="write a Markdown report (first line = title) for a GitHub issue")
     ap.add_argument("--mention", default=os.environ.get("REPORT_MENTION"), help="GitHub username to @mention")
+    ap.add_argument("--charts-dir", help="draw the website's charts as PNGs into this folder")
+    ap.add_argument("--asset-base", help="public URL prefix where the chart folder will be hosted; "
+                                         "the report date is appended, e.g. <base>/2026-11-12/vol_growth.png")
     args = ap.parse_args()
     px = M.fetch_prices(M.all_tickers(), M.HISTORY_START)
     # Use completed sessions only: at 8:31 CT the market has just opened, so drop today's partial bar.
@@ -311,8 +330,16 @@ def main():
     if px.index[-1].date() == now_ny.date() and (now_ny.hour, now_ny.minute) < (16, 30):
         px = px.iloc[:-1]
     data = build(px)
+    img_base = None
+    if args.charts_dir:
+        import report_charts
+        day = data["last"].strftime("%Y-%m-%d")
+        files = report_charts.make_charts(data["px"], data["rets"], data["ev_date"], data["ev_df"], Path(args.charts_dir) / day)
+        print(f"Charts: {len(files)} PNGs in {Path(args.charts_dir) / day}")
+        if args.asset_base:
+            img_base = f"{args.asset_base.rstrip('/')}/{day}"
     if args.issue_md:
-        title, md = render_md(data, args.mention)
+        title, md = render_md(data, args.mention, img_base)
         Path(args.issue_md).write_text(f"{title}\n{md}\n", encoding="utf-8")
         print(f"Saved {args.issue_md}  ({title})")
     subject, body = render(data)

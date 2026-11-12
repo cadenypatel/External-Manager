@@ -77,7 +77,7 @@ For internal research and monitoring. Not investment advice.
 
 ## Daily email report
 
-`.github/workflows/daily-email.yml` runs every morning at 8:31 Central Time. It works the same way as RWAPI: it opens a GitHub issue labeled `daily-report` that @mentions you, and GitHub emails it to your account's notification address. No email passwords are involved. The issue covers a market snapshot, notable S&P 500 days, the growth and value peer tables and the latest shock day, using Yahoo data only (never Eikon). It's built from completed sessions only.
+`.github/workflows/daily-email.yml` runs every morning at 5:00 AM Central Time. It works the same way as RWAPI: it opens a GitHub issue labeled `daily-report` that @mentions you, and GitHub emails it to your account's notification address. No email passwords are involved. The issue covers a market snapshot, notable S&P 500 days, the growth and value peer tables and the latest shock day, plus the website's eight charts (volatility, performance, shock-day scatters and paths), using Yahoo data only (never Eikon). The chart images are stored by date on the `report-assets` branch. It's built from completed sessions only.
 
 - **To get it in a second inbox,** add a forwarding rule in the receiving mailbox, for example Gmail → Settings → Forwarding to your Outlook address.
 - **To test it now,** go to **Actions → Daily email report → Run workflow**.

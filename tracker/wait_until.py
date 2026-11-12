@@ -1,10 +1,10 @@
 """
-Holds a scheduled GitHub Actions run until a target local time (default 08:31 America/Chicago).
+Holds a scheduled GitHub Actions run until a target local time (default 05:00 America/Chicago).
 
-GitHub cron runs in UTC and does not follow daylight saving, so the workflow is scheduled at
-both 13:00 and 14:00 UTC. Only the run whose hour matches today's 08:31 CT (13:31 UTC in
-summer, 14:31 UTC in winter) proceeds; it waits until 08:31 CT and then lets the email send.
-Manual runs (workflow_dispatch) send immediately.
+GitHub cron runs in UTC, ignores daylight saving, and often starts a few minutes late. So the
+workflow is scheduled one hour early at both UTC hours that can precede the target (summer and
+winter). Only the run whose hour is exactly one hour before today's target proceeds; it waits
+until the target time and then lets the report go out. Manual runs (workflow_dispatch) go immediately.
 """
 
 import datetime as dt
@@ -14,7 +14,7 @@ import time
 from zoneinfo import ZoneInfo
 
 TZ = ZoneInfo(os.environ.get("REPORT_TZ", "America/Chicago"))
-HH, MM = (int(x) for x in os.environ.get("REPORT_TIME", "08:31").split(":"))
+HH, MM = (int(x) for x in os.environ.get("REPORT_TIME", "05:00").split(":"))
 
 
 def main():
@@ -33,8 +33,8 @@ def main():
 
     now_local = dt.datetime.now(TZ)
     target = now_local.replace(hour=HH, minute=MM, second=0, microsecond=0)
-    target_utc = target.astimezone(dt.timezone.utc)
-    expected = f"0 {target_utc.hour} * * *"
+    slot_utc = (target - dt.timedelta(hours=1)).astimezone(dt.timezone.utc)
+    expected = f"0 {slot_utc.hour} * * *"
     if schedule.strip() != expected:
         print(f"Trigger '{schedule}' is not today's slot ('{expected}' for {HH:02d}:{MM:02d} {TZ.key}). Skipping.")
         return emit(False)

@@ -1,21 +1,22 @@
-name: Daily email report (8:31 CT)
+name: Daily email report (5:00 CT)
 
-# Every morning at 8:31 Central Time this opens a GitHub issue with an overview of the PUBLIC
-# dashboard and @mentions the repo owner, so GitHub emails it to the owner's notification
-# address - the same method as RWAPI. No email passwords or app passwords needed.
-# Data: Yahoo Finance only (never Eikon).
+# Every morning at 5:00 AM Central Time this opens a GitHub issue with an overview of the PUBLIC
+# dashboard, including the website's charts, and @mentions the repo owner so GitHub emails it
+# (same method as RWAPI - no email passwords). Data: Yahoo Finance only (never Eikon).
 #
-# GitHub cron is UTC with no daylight saving, so both 13:00 and 14:00 UTC are scheduled and
-# tracker/wait_until.py keeps only today's correct slot and waits until 8:31 CT.
+# Charts are drawn as PNGs and stored on the `report-assets` branch under <date>/, so each
+# day's email keeps its own charts.
+# GitHub cron is UTC with no daylight saving and often starts late, so it is scheduled one hour
+# early at both possible UTC hours; tracker/wait_until.py keeps today's slot and waits until 5:00 CT.
 
 on:
   schedule:
-    - cron: "0 13 * * *"
-    - cron: "0 14 * * *"
+    - cron: "0 9 * * *"
+    - cron: "0 10 * * *"
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write   # push chart images to the report-assets branch
   issues: write     # the report is opened as an issue; GitHub emails the @mentioned owner
 
 concurrency:
@@ -25,7 +26,10 @@ concurrency:
 jobs:
   report:
     runs-on: ubuntu-latest
-    timeout-minutes: 75
+    timeout-minutes: 100
+    env:
+      REPORT_TIME: "05:00"
+      REPORT_TZ: America/Chicago
     steps:
       - uses: actions/checkout@v4
 
@@ -33,7 +37,7 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Wait until 8:31 CT
+      - name: Wait until 5:00 CT
         id: gate
         env:
           TRIGGER_SCHEDULE: ${{ github.event.schedule }}
@@ -41,18 +45,41 @@ jobs:
 
       - name: Install dependencies
         if: steps.gate.outputs.send == 'true'
-        run: pip install "yfinance>=0.2.66" "pandas>=2.2" "numpy>=1.26" "openpyxl>=3.1"
+        run: pip install "yfinance>=0.2.66" "pandas>=2.2" "numpy>=1.26" "openpyxl>=3.1" "matplotlib>=3.8"
 
-      - name: Build report
+      - name: Build report and charts
         if: steps.gate.outputs.send == 'true'
-        run: python tracker/daily_report.py --issue-md report.md --mention "${{ github.repository_owner }}"
+        run: |
+          python tracker/daily_report.py \
+            --charts-dir charts \
+            --asset-base "https://raw.githubusercontent.com/${{ github.repository }}/report-assets" \
+            --issue-md report.md --mention "${{ github.repository_owner }}"
+
+      - name: Publish chart images (report-assets branch)
+        if: steps.gate.outputs.send == 'true'
+        run: |
+          set -e
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          if git ls-remote --exit-code --heads origin report-assets >/dev/null 2>&1; then
+            git fetch --depth 1 origin report-assets
+            git worktree add --detach "$RUNNER_TEMP/assets" FETCH_HEAD
+          else
+            git worktree add --detach "$RUNNER_TEMP/assets"
+            (cd "$RUNNER_TEMP/assets" && git checkout --orphan report-assets && git rm -rfq .)
+          fi
+          cp -r charts/* "$RUNNER_TEMP/assets/"
+          cd "$RUNNER_TEMP/assets"
+          git add -A
+          git commit -qm "Report charts $(ls -d */ | tail -n 1 | tr -d /)" || echo "No chart changes"
+          git push -q origin HEAD:report-assets
 
       - name: Open report issue (GitHub emails you)
         if: steps.gate.outputs.send == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh label create daily-report --color 1F3864 --description "Daily 8:31 CT report" --force >/dev/null 2>&1 || true
+          gh label create daily-report --color 1F3864 --description "Daily 5:00 CT report" --force >/dev/null 2>&1 || true
           TITLE=$(head -n 1 report.md)
           tail -n +2 report.md > body.md
           gh issue create --title "$TITLE" --body-file body.md --label daily-report
