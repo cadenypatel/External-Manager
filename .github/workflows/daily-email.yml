@@ -20,6 +20,7 @@ on:
     - cron: "23 11 * * 1-5"
     - cron: "53 11 * * 1-5"
     - cron: "37 12 * * 1-5"
+    - cron: "3 13 * * 5"     # TEMPORARY test (Fri 13:03 UTC): proves GitHub fires this schedule; it skips sending
   workflow_dispatch:
 
 permissions:
@@ -99,5 +100,13 @@ jobs:
         run: |
           gh label create daily-report --color 1F3864 --description "Daily 5:00 CT report" --force >/dev/null 2>&1 || true
           TITLE=$(head -n 1 report.md)
+          # Business days only: after a market holiday the latest close is unchanged, so if a report
+          # for this data date already exists, don't send a repeat.
+          DATA_DATE=$(echo "$TITLE" | awk -F' · ' '{print $2}')
+          if [ "${{ github.event_name }}" = "schedule" ] && [ -n "$DATA_DATE" ]; then
+            N=$(gh issue list --repo "${{ github.repository }}" --label daily-report --state all \
+                  --search "\"$DATA_DATE\" in:title" --json number --jq length 2>/dev/null || echo 0)
+            if [ "${N:-0}" -gt 0 ]; then echo "A report for $DATA_DATE already exists (market holiday?) - skipping."; exit 0; fi
+          fi
           tail -n +2 report.md > body.md
           gh issue create --title "$TITLE" --body-file body.md --label daily-report
