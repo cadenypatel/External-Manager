@@ -39,6 +39,8 @@ def main():
         return emit(True, "Manual run: sending now.")
 
     now = dt.datetime.now(TZ)
+    if now.weekday() >= 5:                       # Saturday/Sunday local time: no report
+        return emit(False, f"{now:%A} - weekday reports only. Skipping.")
     target = now.replace(hour=HH, minute=MM, second=0, microsecond=0)
     gap = (target - now).total_seconds()
     if gap > MAX_WAIT:

@@ -1,6 +1,6 @@
-name: Daily email report (5:00 CT)
+name: Daily email report (5:00 CT, Mon-Fri)
 
-# Every morning at 5:00 AM Central Time this opens a GitHub issue with an overview of the PUBLIC
+# Every weekday (Mon-Fri) at 5:00 AM Central Time this opens a GitHub issue with an overview of the PUBLIC
 # dashboard, including the website's charts, and @mentions the repo owner so GitHub emails it
 # (same method as RWAPI - no email passwords). Data: Yahoo Finance only (never Eikon).
 #
@@ -14,12 +14,12 @@ on:
     # 5:00 CT = 10:00 UTC (daylight time) / 11:00 UTC (standard time). GitHub's scheduler is
     # best-effort and busiest on the hour, so use off-peak minutes: two primary slots that wait
     # until 5:00, then backups that only send if today's report hasn't gone out.
-    - cron: "17 9 * * *"
-    - cron: "17 10 * * *"
-    - cron: "43 10 * * *"
-    - cron: "23 11 * * *"
-    - cron: "53 11 * * *"
-    - cron: "37 12 * * *"
+    - cron: "17 9 * * 1-5"
+    - cron: "17 10 * * 1-5"
+    - cron: "43 10 * * 1-5"
+    - cron: "23 11 * * 1-5"
+    - cron: "53 11 * * 1-5"
+    - cron: "37 12 * * 1-5"
   workflow_dispatch:
 
 permissions:
