@@ -141,11 +141,34 @@ def apply_eikon_nav(px, navs):
     return px
 
 
-def fetch_prices(tickers, start):
+def _download(tickers, start):
     px = yf.download(tickers, start=start, auto_adjust=True, progress=False)["Close"]
     if isinstance(px, pd.Series):
         px = px.to_frame()
     px.index = pd.to_datetime(px.index).tz_localize(None).normalize()
+    return px
+
+
+def fetch_prices(tickers, start, attempts=4):
+    """Download with retries: Yahoo occasionally rate-limits or returns partial data (common on
+    cloud runners). Missing tickers are re-requested with a growing pause between tries."""
+    import time
+    px = _download(tickers, start)
+    for k in range(1, attempts):
+        missing = [t for t in tickers if t not in px.columns or px[t].dropna().empty]
+        if not missing:
+            break
+        wait = 15 * k
+        print(f"Retrying {missing} in {wait}s (attempt {k + 1}/{attempts})...", file=sys.stderr)
+        time.sleep(wait)
+        try:
+            more = _download(missing, start)
+        except Exception as e:
+            print(f"  retry failed: {e}", file=sys.stderr)
+            continue
+        for t in missing:
+            if t in more.columns and more[t].notna().any():
+                px = px.join(more[[t]], how="outer") if t not in px.columns else px.combine_first(more[[t]])
     missing = [t for t in tickers if t not in px.columns or px[t].dropna().empty]
     if missing:
         print(f"WARNING: no data returned for {missing}", file=sys.stderr)

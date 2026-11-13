@@ -11,8 +11,15 @@ name: Daily email report (5:00 CT)
 
 on:
   schedule:
-    - cron: "0 9 * * *"
-    - cron: "0 10 * * *"
+    # 5:00 CT = 10:00 UTC (daylight time) / 11:00 UTC (standard time). GitHub's scheduler is
+    # best-effort and busiest on the hour, so use off-peak minutes: two primary slots that wait
+    # until 5:00, then backups that only send if today's report hasn't gone out.
+    - cron: "17 9 * * *"
+    - cron: "17 10 * * *"
+    - cron: "43 10 * * *"
+    - cron: "23 11 * * *"
+    - cron: "53 11 * * *"
+    - cron: "37 12 * * *"
   workflow_dispatch:
 
 permissions:
@@ -38,10 +45,21 @@ jobs:
           python-version: "3.12"
 
       - name: Wait until 5:00 CT
+        id: wait
+        run: python tracker/wait_until.py
+
+      - name: Skip if today's report already went out
         id: gate
         env:
-          TRIGGER_SCHEDULE: ${{ github.event.schedule }}
-        run: python tracker/wait_until.py
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if [ "${{ steps.wait.outputs.send }}" != "true" ]; then echo "send=false" >> "$GITHUB_OUTPUT"; exit 0; fi
+          if [ "${{ github.event_name }}" = "schedule" ]; then
+            N=$(gh issue list --repo "${{ github.repository }}" --label daily-report --state all \
+                  --search "created:>=$(date -u +%F)" --json number --jq length 2>/dev/null || echo 0)
+            if [ "${N:-0}" -gt 0 ]; then echo "Today's report already exists - skipping."; echo "send=false" >> "$GITHUB_OUTPUT"; exit 0; fi
+          fi
+          echo "send=true" >> "$GITHUB_OUTPUT"
 
       - name: Install dependencies
         if: steps.gate.outputs.send == 'true'
