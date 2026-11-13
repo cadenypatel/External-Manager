@@ -6,21 +6,14 @@ name: Daily email report (5:00 CT, Mon-Fri)
 #
 # Charts are drawn as PNGs and stored on the `report-assets` branch under <date>/, so each
 # day's email keeps its own charts.
-# GitHub cron is UTC with no daylight saving and often starts late, so it is scheduled one hour
-# early at both possible UTC hours; tracker/wait_until.py keeps today's slot and waits until 5:00 CT.
+# Scheduling: see the comment on `schedule` below and tracker/wait_until.py.
 
 on:
   schedule:
-    # 5:00 CT = 10:00 UTC (daylight time) / 11:00 UTC (standard time). GitHub's scheduler is
-    # best-effort and busiest on the hour, so use off-peak minutes: two primary slots that wait
-    # until 5:00, then backups that only send if today's report hasn't gone out.
-    - cron: "17 9 * * 1-5"
-    - cron: "17 10 * * 1-5"
-    - cron: "43 10 * * 1-5"
-    - cron: "23 11 * * 1-5"
-    - cron: "53 11 * * 1-5"
-    - cron: "37 12 * * 1-5"
-    - cron: "3 13 * * 5"     # TEMPORARY test (Fri 13:03 UTC): proves GitHub fires this schedule; it skips sending
+    # GitHub starts scheduled runs on this repo hours late (7-8h has been typical), so trigger
+    # every hour, around the clock. tracker/wait_until.py lets a run that lands within ~5h40m
+    # before 5:00 CT wait and send at exactly 5:00; every other run exits in seconds.
+    - cron: "17 * * * *"
   workflow_dispatch:
 
 permissions:
@@ -34,7 +27,7 @@ concurrency:
 jobs:
   report:
     runs-on: ubuntu-latest
-    timeout-minutes: 100
+    timeout-minutes: 355   # long enough to wait up to 5h40m for 5:00 CT
     env:
       REPORT_TIME: "05:00"
       REPORT_TZ: America/Chicago
