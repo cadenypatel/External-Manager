@@ -225,10 +225,14 @@ def render_md(d, mention=None, img_base=None):
     sp, g, v = idx[M.SP500], idx[M.R1G], idx[M.R1V]
     arrow = lambda x: "" if x is None or (isinstance(x, float) and np.isnan(x)) or x == 0 else ("▲ " if x > 0 else "▼ ")
     P = lambda x: arrow(x) + pct(x, sign=True)
+    from zoneinfo import ZoneInfo
+    weekend = dt.datetime.now(ZoneInfo("America/Chicago")).weekday() >= 5
     L = []
     if mention:
         L.append(f"@{mention} — daily overview of the public dashboard.\n")
     L.append(f"**Data as of {fdate(last)} close** · lookback 1 year · [Open the dashboard]({SITE_URL})\n")
+    if weekend:
+        L.append(f"> **Weekend edition:** markets are closed, so every figure below is from the last close ({fdate(last)}).\n")
     L.append(f"> The S&P 500 returned **{pct(sp['ret_1d'], sign=True)}** ({num(d['sig'].get(last), 1, True)}σ vs its 1-year volatility). "
              f"Russell 1000 Growth {pct(g['ret_1d'], sign=True)}, Russell 1000 Value {pct(v['ret_1d'], sign=True)}.\n")
 
@@ -293,6 +297,8 @@ def render_md(d, mention=None, img_base=None):
     L.append("\n---\n<sub>Public mutual fund and ETF proxies for the SMA strategies; end-of-day total returns from Yahoo Finance. "
              "No Eikon or other licensed data. For internal research and monitoring. Not investment advice.</sub>")
     title = f"Equity Manager Tracker · {fdate(last)} · S&P 500 {pct(sp['ret_1d'], sign=True)}"
+    if weekend:
+        title += " · Weekend edition"
     return title, "\n".join(L)
 
 

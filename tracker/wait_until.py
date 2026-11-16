@@ -1,11 +1,10 @@
 """
-Gate for the scheduled daily report (default 05:00 America/Chicago, Monday-Friday).
+Gate for the scheduled daily report (default 05:00 America/Chicago, every day).
 
 GitHub's scheduler is best-effort, and for this repo scheduled runs have started 7-8 hours
 late. So the workflow is triggered every hour, around the clock, and every run applies one rule
 against the next 05:00 CT target (today's, or tomorrow's once today's window has passed):
 
-  * target day is Saturday/Sunday              -> skip
   * more than MAX_WAIT before the target       -> skip (a later run will be closer)
   * up to MAX_WAIT before the target           -> wait until the target, then send
   * from the target to LATE_OK after it        -> send now (GitHub started it late)
@@ -33,8 +32,6 @@ def decide(now):
         gap = (target - now).total_seconds()
         if -LATE_OK <= gap:
             break
-    if target.weekday() >= 5:
-        return f"skip:{target:%A} is not a weekday", target, gap
     if gap > MAX_WAIT:
         return f"skip:{int(gap / 60)} min before {target:%a %H:%M} - a later run will be closer", target, gap
     return ("wait" if gap > 0 else "send"), target, gap

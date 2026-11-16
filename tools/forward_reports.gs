@@ -6,14 +6,14 @@
  *   - it is from notifications@github.com
  *   - its subject starts with "[cadenypatel/External-Manager] Equity Manager Tracker"
  *     (so no replies, no other repos, no other GitHub email)
- *   - it arrived TODAY, on a weekday, between 04:55 and 10:05 Central Time
+ *   - it arrived TODAY (any day of the week), between 04:55 and 10:05 Central Time
  *     (the 5:00 AM report, with room for GitHub starting late)
  *   - it arrived after this script was installed (setup), so older reports are never sent
  *   - nothing has been forwarded yet today (max ONE forward per day)
  *
  * Setup: script.google.com -> project -> paste this file -> set RECIPIENTS -> Save ->
  *        run "setup" once and Allow. setup forwards nothing; the first forward is the next
- *        weekday's 5:00 AM report.
+ *        5:00 AM report.
  */
 
 const RECIPIENTS = "boss@example.com";              // comma-separate for more people
@@ -27,7 +27,6 @@ function forwardReports() {
   const now = new Date();
   const today = Utilities.formatDate(now, TZ, "yyyy-MM-dd");
   if (props.getProperty("lastForwardDate") === today) return;          // already sent today
-  if (Number(Utilities.formatDate(now, TZ, "u")) > 5) return;          // Sat=6, Sun=7
 
   const installedAt = Number(props.getProperty("installedAt") || Date.now());
   const threads = GmailApp.search(
@@ -54,7 +53,7 @@ function forwardReports() {
 }
 
 // Run once. Creates the every-5-minutes check. Forwards NOTHING now, and marks today as done,
-// so the first forward is the next weekday's 5:00 AM report.
+// so the first forward is the next 5:00 AM report.
 function setup() {
   ScriptApp.getProjectTriggers().forEach(function (t) {
     if (t.getHandlerFunction() === "forwardReports") ScriptApp.deleteTrigger(t);
