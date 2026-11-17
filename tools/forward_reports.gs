@@ -78,7 +78,7 @@ function startReport_(props, now, today) {
   const hm = Utilities.formatDate(now, TZ, "HH:mm");
   if (hm < START_FROM || hm > START_UNTIL) return;
   if (props.getProperty("lastStartDate") === today) return;
-  const token = props.getProperty("GITHUB_TOKEN");
+  const token = (props.getProperty("GITHUB_TOKEN") || "").replace(/\s|"|'/g, "");
   if (!token) return;
   const res = UrlFetchApp.fetch(
     "https://api.github.com/repos/" + REPO + "/actions/workflows/daily-email.yml/dispatches", {
@@ -91,8 +91,12 @@ function startReport_(props, now, today) {
 
 // Run once after saving GITHUB_TOKEN. Only checks the token can see the workflow; sends nothing.
 function checkToken() {
-  const token = PropertiesService.getScriptProperties().getProperty("GITHUB_TOKEN");
+  const raw = PropertiesService.getScriptProperties().getProperty("GITHUB_TOKEN") || "";
+  const token = raw.replace(/\s|"|'/g, "");
   if (!token) throw new Error("Add GITHUB_TOKEN under Project Settings -> Script Properties first.");
+  // Describes the saved value without revealing it.
+  console.log("Saved token: " + token.length + " characters, starts with github_pat_: " +
+              (token.indexOf("github_pat_") === 0) + ", extra spaces/quotes removed: " + (raw !== token));
   const res = UrlFetchApp.fetch(
     "https://api.github.com/repos/" + REPO + "/actions/workflows/daily-email.yml", {
       muteHttpExceptions: true,
