@@ -9,12 +9,18 @@ name: Daily email report (5:00 CT, every day)
 # Scheduling: see the comment on `schedule` below and tracker/wait_until.py.
 
 on:
-  schedule:
-    # GitHub starts scheduled runs on this repo hours late (7-8h has been typical), so trigger
-    # every hour, around the clock. tracker/wait_until.py lets a run that lands within ~5h40m
-    # before 5:00 CT wait and send at exactly 5:00; every other run exits in seconds.
-    - cron: "17 * * * *"
+  # Main trigger: the Gmail Apps Script (tools/forward_reports.gs) starts this at ~4:45 CT every
+  # day with timed=true. The report is built right away and held until exactly 5:00 CT.
   workflow_dispatch:
+    inputs:
+      timed:
+        description: "Hold the report until 5:00 CT (used by the Gmail trigger). Leave off to send now."
+        type: boolean
+        default: false
+  schedule:
+    # Backup only: GitHub's scheduler on this repo runs hours late and skips hours, so it can't be
+    # relied on for 5:00 sharp. A run that lands within ~5h40m before 5:00 CT holds until 5:00.
+    - cron: "17 * * * *"
 
 permissions:
   contents: write   # push chart images to the report-assets branch
@@ -27,7 +33,7 @@ concurrency:
 jobs:
   report:
     runs-on: ubuntu-latest
-    timeout-minutes: 355   # long enough to wait up to 5h40m for 5:00 CT
+    timeout-minutes: 355   # long enough to hold up to 5h40m for 5:00 CT
     env:
       REPORT_TIME: "05:00"
       REPORT_TZ: America/Chicago
@@ -38,8 +44,10 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Wait until 5:00 CT
+      - name: Decide (send at 5:00 CT, or skip)
         id: wait
+        env:
+          TIMED: ${{ github.event_name == 'schedule' || inputs.timed == true }}
         run: python tracker/wait_until.py
 
       - name: Skip if today's report already went out
@@ -48,7 +56,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           if [ "${{ steps.wait.outputs.send }}" != "true" ]; then echo "send=false" >> "$GITHUB_OUTPUT"; exit 0; fi
-          if [ "${{ github.event_name }}" = "schedule" ]; then
+          if [ "${{ github.event_name == 'schedule' || inputs.timed == true }}" = "true" ]; then
             N=$(gh issue list --repo "${{ github.repository }}" --label daily-report --state all \
                   --search "created:>=$(date -u +%F)" --json number --jq length 2>/dev/null || echo 0)
             if [ "${N:-0}" -gt 0 ]; then echo "Today's report already exists - skipping."; echo "send=false" >> "$GITHUB_OUTPUT"; exit 0; fi
@@ -86,6 +94,12 @@ jobs:
           git commit -qm "Report charts $(ls -d */ | tail -n 1 | tr -d /)" || echo "No chart changes"
           git push -q origin HEAD:report-assets
 
+      - name: Hold until 5:00 CT
+        if: steps.gate.outputs.send == 'true'
+        env:
+          TARGET_EPOCH: ${{ steps.wait.outputs.target }}
+        run: python tracker/wait_until.py --sleep
+
       - name: Open report issue (GitHub emails you)
         if: steps.gate.outputs.send == 'true'
         env:
@@ -93,5 +107,10 @@ jobs:
         run: |
           gh label create daily-report --color 1F3864 --description "Daily 5:00 CT report" --force >/dev/null 2>&1 || true
           TITLE=$(head -n 1 report.md)
+          # Another run may have sent today's report while this one was holding.
+          if [ "${{ github.event_name == 'schedule' || inputs.timed == true }}" = "true" ]; then
+            N=$(gh issue list --repo "${{ github.repository }}" --label daily-report --state all                   --search "created:>=$(date -u +%F)" --json number --jq length 2>/dev/null || echo 0)
+            if [ "${N:-0}" -gt 0 ]; then echo "Today's report already went out - skipping."; exit 0; fi
+          fi
           tail -n +2 report.md > body.md
           gh issue create --title "$TITLE" --body-file body.md --label daily-report
