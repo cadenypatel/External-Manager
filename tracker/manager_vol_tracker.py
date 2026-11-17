@@ -51,8 +51,12 @@ INDEXES = {
     SP500: {"name": "S&P 500 Index (TR)",              "short": "S&P 500"},
     R1G:   {"name": "Russell 1000 Growth Index (TR)",  "short": "R1000 Growth"},
     R1V:   {"name": "Russell 1000 Value Index (TR)",   "short": "R1000 Value"},
+    "SPYG": {"name": "S&P 500 Growth (SPYG ETF, TR)", "short": "SPYG"},
+    "SPYV": {"name": "S&P 500 Value (SPYV ETF, TR)",  "short": "SPYV"},
 }
 STYLE_INDEX = {"Growth": R1G, "Value": R1V}
+# Benchmark rows shown under each peer group on the website (gray footer rows).
+PEER_BENCHMARKS = {"Growth": [SP500, "SPYG", R1G], "Value": [R1V, "SPYV"]}
 
 # stated_benchmark = the primary benchmark the manager lists; source says where it was confirmed.
 FUNDS = [
@@ -99,7 +103,7 @@ def fund_tickers():
 
 
 def all_tickers():
-    return fund_tickers() + [R1G, R1V, SP500]
+    return fund_tickers() + [R1G, R1V, SP500, "SPYG", "SPYV"]
 
 
 ETF_NAV_FROM_EIKON = set()   # filled at run time when Eikon supplies ETF NAVs
@@ -400,6 +404,7 @@ def build_json(px, rets, events, cur_df=None, bench_df=None):
         "default_event": default_event.strftime("%Y-%m-%d"),
         "named_events": [{"date": d, "label": l} for d, l in EVENTS],
         "indexes": INDEXES, "style_index": STYLE_INDEX, "sp500": SP500,
+        "peer_benchmarks": PEER_BENCHMARKS,
         "funds": [{**f, "pricing_basis": pricing_basis(f)} for f in FUNDS],
         "series": {"dates": [d.strftime("%Y-%m-%d") for d in px.index],
                    "price": {t: [None if pd.isna(v) else round(float(v), 6) for v in px[t].tolist()] for t in px.columns}},

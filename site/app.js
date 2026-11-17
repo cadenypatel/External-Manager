@@ -337,15 +337,31 @@
     return { date: E.dates[e], rows, market, groups, corrs };
   }
 
+  // Five headline tiles. With a date selected: that day's returns. Without one: total return over the lookback.
   function renderTiles(ev) {
-    const m = ev.market, g = ev.groups.find((x) => x.style === "Growth"), v = ev.groups.find((x) => x.style === "Value");
-    const tiles = [
-      ["S&P 500 Index (TR)", pct(m.spy_ret), `${num(m.spy_sigma, 1)}σ vs its prior ${rangeLabel()} volatility`],
-      ["Russell 1000 Growth (TR)", pct(m.r1g_ret), "Growth style index"],
-      ["Russell 1000 Value (TR)", pct(m.r1v_ret), "Value style index"],
-      ["Growth peers (avg)", pct(g.event_ret), `${pct(g.excess_style, 2, true)} vs R1000 Growth`],
-      ["Value peers (avg)", pct(v.event_ret), `${pct(v.excess_style, 2, true)} vs R1000 Value`],
-    ];
+    let tiles;
+    if (ev) {
+      const m = ev.market, g = ev.groups.find((x) => x.style === "Growth"), v = ev.groups.find((x) => x.style === "Value");
+      const day = fmtDate(ev.date);
+      tiles = [
+        ["S&P 500 Index (TR)", pct(m.spy_ret), `${day} · ${num(m.spy_sigma, 1)}σ vs its prior ${rangeLabel()} volatility`],
+        ["Russell 1000 Growth (TR)", pct(m.r1g_ret), `${day} · growth style index`],
+        ["Russell 1000 Value (TR)", pct(m.r1v_ret), `${day} · value style index`],
+        ["Growth peers (avg)", pct(g.event_ret), `${day} · average of ${g.n} growth managers`],
+        ["Value peers (avg)", pct(v.event_ret), `${day} · average of ${v.n} value managers`],
+      ];
+    } else {
+      const [a, b] = win(E.last), span = `${rangeLabel()} total return · ${fmtDate(E.dates[a])} to ${fmtDate(E.dates[b])}`;
+      const peerAvg = (style) => { const v = nn(fundsBy(style).map((f) => periodRet(f.ticker, a, b))); return [v.length ? mean(v) : null, v.length]; };
+      const [gr, gn] = peerAvg("Growth"), [vr, vn] = peerAvg("Value");
+      tiles = [
+        ["S&P 500 Index (TR)", pct(periodRet(DATA.sp500, a, b)), span],
+        ["Russell 1000 Growth (TR)", pct(periodRet(DATA.style_index.Growth, a, b)), span],
+        ["Russell 1000 Value (TR)", pct(periodRet(DATA.style_index.Value, a, b)), span],
+        ["Growth peers (avg)", pct(gr), `${rangeLabel()} total return · average of ${gn} growth managers`],
+        ["Value peers (avg)", pct(vr), `${rangeLabel()} total return · average of ${vn} value managers`],
+      ];
+    }
     document.getElementById("marketTiles").innerHTML = tiles
       .map(([k, val, s]) => `<div class="tile"><div class="k">${k}</div><div class="v">${val}</div><div class="s">${s}</div></div>`).join("");
   }
@@ -364,8 +380,7 @@
       const rs = rows.filter((r) => r.style === style).sort((a, b) => b.event_ret - a.event_ret);
       if (!rs.length) return "";
       const top = rs[0], bot = rs[rs.length - 1];
-      return `${style} peers: best was <b>${esc(top.manager)}</b> (${pct(top.event_ret)}, ${pct(top.excess_stated, 2, true)} vs its ${idxShort(top.stated_benchmark)} benchmark), ` +
-        `worst was <b>${esc(bot.manager)}</b> (${pct(bot.event_ret)}, ${pct(bot.excess_stated, 2, true)} vs ${idxShort(bot.stated_benchmark)}).`;
+      return `${style} peers: best was <b>${esc(top.manager)}</b> (${pct(top.event_ret)}), worst was <b>${esc(bot.manager)}</b> (${pct(bot.event_ret)}).`;
     };
     p.push(`<p>${peerLine("Growth")}<br>${peerLine("Value")}</p>`);
     const withA = rows.filter((r) => r.alpha_day != null);
@@ -398,7 +413,6 @@
           tooltip: { callbacks: {
             title: (items) => items[0].raw.row.manager,
             label: (it) => [`${xTitle}: ${xFmt(it.raw.x)}`, `Shock-day return: ${pct(it.raw.y)}`,
-              `vs ${idxShort(it.raw.row.stated_benchmark)} (stated bmk): ${pct(it.raw.row.excess_stated, 2, true)}`,
               `Rank in ${it.raw.row.style.toLowerCase()} peers: ${it.raw.row.event_peer_rank} of ${it.raw.row.peer_count}`,
               `Beyond beta: ${pct(it.raw.row.alpha_day, 2, true)}`],
           } },
@@ -433,15 +447,47 @@
       },
     });
   }
+  // Benchmarks listed under each peer group (gray rows).
+  const peerBenchmarks = (style) => ((DATA.peer_benchmarks && DATA.peer_benchmarks[style]) || [DATA.sp500, benchFor(style)]).filter((t) => E.price[t]);
+
+  // No date selected: each peer group's returns and risk over the lookback window.
+  function renderPeriodTables() {
+    const [a, b] = win(E.last), L = rangeLabel(), P = (v) => pct(v), Ps = (v) => pct(v, 2, true), R = (v) => num(v);
+    const rowFor = (name, t, style) => ({ manager: name, ticker: t, style, ret_range: periodRet(t, a, b), vol_range: annVol(t, a, b),
+      beta_spy: beta(t, DATA.sp500, a, b), max_dd: maxDD(t, a, b) });
+    const rows = DATA.funds.map((f) => ({ ...rowFor(f.manager, f.ticker, f.style), stated_benchmark: f.stated_benchmark,
+      down_cap: capture(f.ticker, f.stated_benchmark, a, b, "down") }));
+    addPeer(rows, "ret_range", true, "ret");
+    const cols = [
+      { key: "manager", label: "Manager", txt: true, render: managerCell },
+      { key: "stated_benchmark", label: "Stated benchmark", txt: true, render: bmkCell, title: "The primary benchmark the manager lists" },
+      { key: "ret_range", label: `Total return (${L})`, fmt: P, color: true },
+      { key: "ret_peer_rank", label: "Peer rank", render: rankCell, title: "Rank within this peer group only (1 = best)" },
+      { key: "ret_vs_peer", label: "vs peer median", fmt: Ps, color: true },
+      { key: "vol_range", label: `Vol (${L})`, fmt: (v) => pct(v, 1) },
+      { key: "beta_spy", label: `Beta vs S&P (${L})`, fmt: R },
+      { key: "down_cap", label: `Downside capture (${L})`, fmt: R },
+      { key: "max_dd", label: `Max drawdown (${L})`, fmt: P },
+    ];
+    ["Growth", "Value"].forEach((style) => {
+      const rs = rows.filter((r) => r.style === style);
+      const agg = (f, k) => { const v = nn(rs.map((r) => r[k])); return v.length ? f(v) : null; };
+      const keys = ["ret_range", "vol_range", "beta_spy", "down_cap", "max_dd"];
+      const footer = [
+        { manager: `${style} peer median`, ...Object.fromEntries(keys.map((k) => [k, agg(median, k)])) },
+        { manager: `${style} peer average`, ...Object.fromEntries(keys.map((k) => [k, agg(mean, k)])) },
+        ...peerBenchmarks(style).map((t) => rowFor(idxName(t), t, "Benchmark")),
+      ];
+      table(document.getElementById("event" + style), cols, rs, { sortable: true, sortKey: "ret_range", asc: false, footer });
+    });
+  }
+
   function renderEventTables(ev) {
     const P = (v) => pct(v), Ps = (v) => pct(v, 2, true), R = (v) => num(v), L = rangeLabel();
     const cols = [
       { key: "manager", label: "Manager", txt: true, render: managerCell },
       { key: "stated_benchmark", label: "Stated benchmark", txt: true, render: bmkCell, title: "The primary benchmark the manager lists" },
       { key: "event_ret", label: "Shock-day return", fmt: P, color: true },
-      { key: "excess_stated", label: "vs stated bmk", fmt: Ps, color: true },
-      { key: "excess_spy", label: "vs S&P 500", fmt: Ps, color: true },
-      { key: "excess_style", label: "vs style index", fmt: Ps, color: true },
       { key: "event_peer_rank", label: "Peer rank", render: rankCell, title: "Rank within this peer group only (1 = best)" },
       { key: "event_vs_peer", label: "vs peer median", fmt: Ps, color: true },
       { key: "sigma_own", label: `Move in own σ (${L})`, fmt: (v) => num(v, 1) + "σ", title: "Shock-day return ÷ the fund's own daily standard deviation over the lookback window before the shock" },
@@ -455,19 +501,35 @@
     ];
     ["Growth", "Value"].forEach((style) => {
       const g = ev.groups.find((x) => x.style === style);
+      const e = E.dates.indexOf(ev.date);
       const footer = [
         { manager: `${style} peer median`, event_ret: g.event_ret_median },
-        { manager: `${style} peer average`, event_ret: g.event_ret, excess_stated: g.excess_stated, excess_spy: g.excess_spy, excess_style: g.excess_style,
+        { manager: `${style} peer average`, event_ret: g.event_ret,
           vol_pre: g.vol_pre, beta_spy_pre: g.beta_spy_pre, down_cap_pre: g.down_cap_pre, alpha_day: g.alpha_day, since_event: g.since_event },
-        { manager: idxName(g.style_index), event_ret: g.style_index_ret },
-        { manager: idxName(DATA.sp500), event_ret: ev.market.spy_ret },
+        ...peerBenchmarks(style).map((t) => ({ manager: idxName(t), style: "Benchmark", event_ret: E.ret[t][e],
+          since_event: e < E.last ? periodRet(t, e + 1, E.last) : null })),
       ];
       table(document.getElementById("event" + style), cols, ev.rows.filter((r) => r.style === style), { sortable: true, sortKey: "event_ret", asc: false, footer });
     });
   }
   function renderShock() {
+    const detail = document.getElementById("shockDetail"), idle = document.getElementById("shockIdle");
+    const clearBtn = document.getElementById("eventClear");
+    if (eventIdx == null) {                      // no date: everything follows the lookback window
+      document.getElementById("eventDate").value = "";
+      clearBtn.hidden = true;
+      detail.hidden = true; idle.hidden = false;
+      const [a, b] = win(E.last);
+      document.getElementById("eventTableNote").textContent = `${rangeLabel()} window, ${fmtDate(E.dates[a])} to ${fmtDate(E.dates[b])}`;
+      renderTiles(null);
+      renderPeriodTables();
+      return;
+    }
+    clearBtn.hidden = false;
+    detail.hidden = false; idle.hidden = true;
     const ev = eventAnalysis(eventIdx);
     const d = E.dates[eventIdx];
+    document.getElementById("eventTableNote").textContent = `Shock day ${fmtDate(d)} · pre-event measures over the ${rangeLabel()} window before it`;
     const named = (DATA.named_events || []).find((x) => x.date === d);
     document.getElementById("eventDate").value = d;
     document.getElementById("capVol").textContent = `Volatility over the ${rangeLabel()} window ending the day before ${fmtDate(d)}`;
@@ -486,8 +548,16 @@
     el.textContent = text;
     el.classList.toggle("warn", warn);
   }
+  const IDLE_NOTE = "Leave the date blank to see returns over the lookback window, or pick a trading day since Jan 1, 2020 (or a day from Find shock days) to switch everything to that day.";
+  function clearDate() {
+    eventIdx = null;
+    setEventNote(IDLE_NOTE);
+    renderShock();
+    renderSigmaList();
+    renderTimeSeries();
+  }
   function selectDate(iso, fromUser = false) {
-    if (!iso) return;
+    if (!iso) return clearDate();
     let i = E.dates.indexOf(iso);
     let note = "";
     if (i < 0) {
@@ -568,8 +638,7 @@
       const si = benchFor(style);
       const footer = [
         { manager: `${style} peer median`, ...Object.fromEntries(["ret_1d", "ret_range", "vol_range", "beta_spy", "max_dd"].map((k) => [k, med(k)])) },
-        riskRow(idxName(si), si, "Benchmark", null, "Index level (close)", a, b),
-        riskRow(idxName(DATA.sp500), DATA.sp500, "Benchmark", null, "Index level (close)", a, b),
+        ...peerBenchmarks(style).map((t) => riskRow(idxName(t), t, "Benchmark", null, t.startsWith("^") ? "Index level (close)" : "ETF close (total return)", a, b)),
       ];
       table(document.getElementById("risk" + style), cols, rs, { sortable: true, sortKey: "vol_range", asc: true, footer });
     });
@@ -603,7 +672,7 @@
     ds.push({ label: idxShort(bi) + " (style index)", data: seriesFor(bi), borderColor: t.bench, backgroundColor: t.bench, borderDash: [5, 4],
       borderWidth: 2, pointRadius: 0, pointHoverRadius: 4, pointStyle: "line", spanGaps: true });
     const marks = sigmaHits.filter((i) => i >= a && i <= b && i !== eventIdx).map((i) => ({ date: E.dates[i] }));
-    if (eventIdx >= a && eventIdx <= b) marks.push({ date: E.dates[eventIdx], strong: true });
+    if (eventIdx != null && eventIdx >= a && eventIdx <= b) marks.push({ date: E.dates[eventIdx], strong: true });
     const span = b - a;
     make(id, {
       type: "line", data: { labels, datasets: ds },
@@ -808,6 +877,7 @@
     renderShock(); renderSigmaList(); renderRisk(); renderTimeSeries();
   }));
   document.getElementById("eventDate").addEventListener("change", (e) => selectDate(e.target.value, true));
+  document.getElementById("eventClear").addEventListener("click", clearDate);
   document.getElementById("sigmaSel").addEventListener("change", (e) => { sigmaK = +e.target.value; renderSigmaList(); renderTimeSeries(); });
   window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => DATA && renderAll());
 
@@ -818,7 +888,8 @@
       buildEngine();
       const input = document.getElementById("eventDate");
       input.min = DATA.config.min_date; input.max = E.dates[E.last];
-      eventIdx = Math.max(E.minIdx, E.dates.indexOf(DATA.default_event) >= 0 ? E.dates.indexOf(DATA.default_event) : E.last);
+      eventIdx = null;                       // date box starts blank: everything follows the lookback
+      setEventNote(IDLE_NOTE);
       document.getElementById("asof").textContent = "Data as of " + fmtDate(DATA.series.dates[E.last]);
       document.getElementById("generated").textContent = "Last refreshed " + new Date(DATA.generated_utc).toLocaleString("en-US", { dateStyle: "medium", timeStyle: "short" }) + ".";
       renderAll();

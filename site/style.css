@@ -214,3 +214,7 @@ tr.primary .flag { color: var(--ink); }
 
 .th-sub { font-weight: 400; font-size: 11px; color: var(--muted); white-space: nowrap; }
 
+.event-controls .btn-quiet { align-self: flex-end; border: 1px solid var(--axis); background: transparent; color: var(--ink); cursor: pointer; font: inherit; font-size: 13px; font-weight: 600; padding: 6px 12px; border-radius: 8px; }
+.event-controls .btn-quiet[hidden] { display: none; }
+.idle-note { margin: 4px 0 20px; padding: 12px 14px; border: 1px dashed var(--axis); border-radius: 10px; color: var(--ink-2); font-size: 14px; }
+.idle-note[hidden] { display: none; }

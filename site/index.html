@@ -53,6 +53,7 @@
           <label class="select-label">Date
             <input type="date" id="eventDate" min="2020-01-01">
           </label>
+          <button type="button" id="eventClear" class="btn btn-quiet" hidden>Clear date</button>
           <label class="select-label">Find shock days
             <select id="sigmaSel">
               <option value="0">Off</option>
@@ -70,9 +71,11 @@
         <div class="sigma-head" id="sigmaHead"></div>
         <div class="sigma-list" id="sigmaList"></div>
       </div>
-      <p class="hint" id="eventNote">Type any trading day since Jan 1, 2020. Pre-event measures use only data from before that day, over the lookback window chosen at the top.</p>
+      <p class="hint" id="eventNote">Leave the date blank to see returns over the lookback window, or pick a trading day since Jan 1, 2020 to switch everything to that day.</p>
 
       <div class="tiles" id="marketTiles"></div>
+      <p class="idle-note" id="shockIdle">Shock-day details (the day's sigma move, best and worst managers, scatter charts and the path through the shock) appear when you pick a date or a day from <b>Find shock days</b>.</p>
+      <div id="shockDetail" hidden>
       <div class="finding" id="finding"></div>
 
       <div class="grid-2">
@@ -96,6 +99,8 @@
           <div class="chart-box"><canvas id="pathValue"></canvas></div>
         </figure>
       </div>
+      </div>
+      <p class="hint" id="eventTableNote"></p>
 
       <div class="card table-card">
         <div class="table-title"><strong><span class="dot Growth"></span> Growth peer group</strong><span>Ranked only against growth peers · click a column to sort</span></div>
@@ -178,19 +183,13 @@
         <h3>How managers are benchmarked</h3>
         <ul>
           <li><b>Peer groups never mix.</b> Growth managers are ranked only against growth managers, and value against value. Peer rank and peer median are computed separately for each group.</li>
-          <li><b>Each manager is shown against three yardsticks:</b>
-            <ol>
-              <li>the <b>stated benchmark</b> its manager lists (see the table above for the source);</li>
-              <li>the <b>S&amp;P 500</b>, for every manager;</li>
-              <li>its <b>style index</b>: the Russell 1000 Growth for growth peers and the Russell 1000 Value for value peers.</li>
-            </ol>
-            The stated benchmark and the style index are the same for every manager except Oakmark, which names the S&amp;P 500 as its benchmark and the Russell 1000 Value as secondary.</li>
-          <li><b>Benchmarks are the actual total-return indexes</b> (S&amp;P 500 TR, Russell 1000 Growth TR and Russell 1000 Value TR), not ETFs that track them.</li>
+          <li><b>Benchmarks sit in the gray rows under each peer group:</b> growth peers against the S&amp;P 500, SPYG (S&amp;P 500 Growth) and the Russell 1000 Growth; value peers against the Russell 1000 Value and SPYV (S&amp;P 500 Value). Manager rows show their own returns only; compare them with the gray rows. The <b>stated benchmark</b> column shows what each manager lists (see the table above for the source); it's used for beta, tracking error and capture in Current risk.</li>
+          <li><b>The S&amp;P 500 and Russell indexes are the actual total-return indexes</b> (S&amp;P 500 TR, Russell 1000 Growth TR and Russell 1000 Value TR). SPYG and SPYV are ETFs, shown at total return (distributions reinvested).</li>
           <li><b>The lookback window at the top drives everything:</b> return, volatility, beta, correlation, tracking error, capture and drawdown in Current risk; the pre-event volatility, beta and downside capture in the shock-day analysis (measured over the window ending the day before the shock); and the charts.</li>
         </ul>
         <h3>Shock days</h3>
         <ul>
-          <li><b>Date box:</b> type any trading day since Jan 1, 2020. If markets were closed that day, the previous trading day is used.</li>
+          <li><b>Date box:</b> blank by default, so the headline returns and peer tables cover the lookback window. Type any trading day since Jan 1, 2020 to switch them to that single day; the shock-day details appear only then. If markets were closed that day, the previous trading day is used. <b>Clear date</b> goes back to the lookback view.</li>
           <li><b>Sigma filter:</b> lists every day in the lookback window when the S&amp;P 500 moved at least that many standard deviations, measured against its own daily volatility over the lookback period ending the day before (3M, 6M, 1Y or 3Y; "Since 2020" uses all history since 2019). A longer lookback usually means a higher baseline and smaller sigma readings. Click a date to analyze it.</li>
         </ul>
         <h3>Why the public funds are valid stand-ins for volatility tracking</h3>
