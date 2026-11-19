@@ -1,34 +1,34 @@
 /**
- * Forwards the 5:00 AM CT Equity Manager Tracker report from this Gmail to other people.
+ * Forwards the 4:00 AM CT Equity Manager Tracker report from this Gmail to other people.
  * Runs inside YOUR Gmail (Google Apps Script) - no forwarding verification, no API keys.
  *
  * Strict rules - it forwards an email ONLY if ALL of these hold:
  *   - it is from notifications@github.com
  *   - its subject starts with "[cadenypatel/External-Manager] Equity Manager Tracker"
  *     (so no replies, no other repos, no other GitHub email)
- *   - it arrived TODAY (any day of the week), between 04:55 and 10:05 Central Time
- *     (the 5:00 AM report, with room for GitHub starting late)
+ *   - it arrived TODAY (any day of the week), between 03:55 and 10:05 Central Time
+ *     (the 4:00 AM report, with room for GitHub starting late)
  *   - it arrived after this script was installed (setup), so older reports are never sent
  *   - nothing has been forwarded yet today (max ONE forward per day)
  *
- * It also STARTS the report: GitHub's own scheduler runs hours late, so at ~4:45 CT each day
- * this script asks GitHub to build the report, and GitHub holds it until exactly 5:00 CT.
+ * It also STARTS the report: GitHub's own scheduler runs hours late, so at ~3:45 CT each day
+ * this script asks GitHub to build the report, and GitHub holds it until exactly 4:00 CT.
  * That needs a GitHub token saved in Project Settings -> Script Properties as GITHUB_TOKEN
  * (fine-grained token, only the External-Manager repo, permission "Actions: Read and write").
  * The token stays in your Google account; it is never in this code or on GitHub.
  *
  * Setup: script.google.com -> project -> paste this file -> set RECIPIENTS -> Save ->
  *        run "setup" once and Allow. setup forwards nothing; the first forward is the next
- *        5:00 AM report. After adding GITHUB_TOKEN, run "checkToken" once (it sends nothing).
+ *        4:00 AM report. After adding GITHUB_TOKEN, run "checkToken" once (it sends nothing).
  */
 
 const RECIPIENTS = "boss@example.com";              // comma-separate for more people
 const TZ = "America/Chicago";
 const SUBJECT_PREFIX = "[cadenypatel/External-Manager] Equity Manager Tracker";
-const WINDOW_START = "04:55";                       // CT
+const WINDOW_START = "03:55";                       // CT
 const WINDOW_END = "10:05";                         // CT
 const REPO = "cadenypatel/External-Manager";
-const START_FROM = "04:40", START_UNTIL = "04:58";  // CT: when to ask GitHub to build the report
+const START_FROM = "03:40", START_UNTIL = "03:58";  // CT: when to ask GitHub to build the report
 
 function forwardReports() {
   const props = PropertiesService.getScriptProperties();
@@ -50,7 +50,7 @@ function forwardReports() {
       if (d.getTime() < installedAt) return;                           // never older reports
       if (Utilities.formatDate(d, TZ, "yyyy-MM-dd") !== today) return; // today's only
       const hm = Utilities.formatDate(d, TZ, "HH:mm");
-      if (hm < WINDOW_START || hm > WINDOW_END) return;                // the 5 AM report only
+      if (hm < WINDOW_START || hm > WINDOW_END) return;                // the 4 AM report only
       candidates.push(m);
     });
   });
@@ -62,7 +62,7 @@ function forwardReports() {
 }
 
 // Run once. Creates the every-5-minutes check. Forwards NOTHING now, and marks today as done,
-// so the first forward is the next 5:00 AM report.
+// so the first forward is the next 4:00 AM report.
 function setup() {
   ScriptApp.getProjectTriggers().forEach(function (t) {
     if (t.getHandlerFunction() === "forwardReports") ScriptApp.deleteTrigger(t);
@@ -73,7 +73,7 @@ function setup() {
   ScriptApp.newTrigger("forwardReports").timeBased().everyMinutes(5).create();
 }
 
-// ~4:45 CT: ask GitHub to build today's report and hold it until 5:00 CT. Once a day.
+// ~3:45 CT: ask GitHub to build today's report and hold it until 4:00 CT. Once a day.
 function startReport_(props, now, today) {
   const hm = Utilities.formatDate(now, TZ, "HH:mm");
   if (hm < START_FROM || hm > START_UNTIL) return;
@@ -101,6 +101,6 @@ function checkToken() {
     "https://api.github.com/repos/" + REPO + "/actions/workflows/daily-email.yml", {
       muteHttpExceptions: true,
       headers: { Authorization: "Bearer " + token, Accept: "application/vnd.github+json" } });
-  console.log(res.getResponseCode() === 200 ? "Token OK - the 4:45 CT start is ready."
+  console.log(res.getResponseCode() === 200 ? "Token OK - the 3:45 CT start is ready."
                                            : "Token problem: " + res.getResponseCode() + " " + res.getContentText());
 }

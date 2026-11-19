@@ -1,6 +1,6 @@
-name: Daily email report (5:00 CT, every day)
+name: Daily email report (4:00 CT, every day)
 
-# Every day at 5:00 AM Central Time (weekends and market holidays show the last close) this opens a GitHub issue with an overview of the PUBLIC
+# Every day at 4:00 AM Central Time (weekends and market holidays show the last close) this opens a GitHub issue with an overview of the PUBLIC
 # dashboard, including the website's charts, and @mentions the repo owner so GitHub emails it
 # (same method as RWAPI - no email passwords). Data: Yahoo Finance only (never Eikon).
 #
@@ -9,17 +9,17 @@ name: Daily email report (5:00 CT, every day)
 # Scheduling: see the comment on `schedule` below and tracker/wait_until.py.
 
 on:
-  # Main trigger: the Gmail Apps Script (tools/forward_reports.gs) starts this at ~4:45 CT every
-  # day with timed=true. The report is built right away and held until exactly 5:00 CT.
+  # Main trigger: the Gmail Apps Script (tools/forward_reports.gs) starts this at ~3:45 CT every
+  # day with timed=true. The report is built right away and held until exactly 4:00 CT.
   workflow_dispatch:
     inputs:
       timed:
-        description: "Hold the report until 5:00 CT (used by the Gmail trigger). Leave off to send now."
+        description: "Hold the report until 4:00 CT (used by the Gmail trigger). Leave off to send now."
         type: boolean
         default: false
   schedule:
     # Backup only: GitHub's scheduler on this repo runs hours late and skips hours, so it can't be
-    # relied on for 5:00 sharp. A run that lands within ~5h40m before 5:00 CT holds until 5:00.
+    # relied on for 4:00 sharp. A run that lands within ~5h40m before 4:00 CT holds until 4:00.
     - cron: "17 * * * *"
 
 permissions:
@@ -33,9 +33,9 @@ concurrency:
 jobs:
   report:
     runs-on: ubuntu-latest
-    timeout-minutes: 355   # long enough to hold up to 5h40m for 5:00 CT
+    timeout-minutes: 355   # long enough to hold up to 5h40m for 4:00 CT
     env:
-      REPORT_TIME: "05:00"
+      REPORT_TIME: "04:00"
       REPORT_TZ: America/Chicago
     steps:
       - uses: actions/checkout@v4
@@ -44,7 +44,7 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Decide (send at 5:00 CT, or skip)
+      - name: Decide (send at 4:00 CT, or skip)
         id: wait
         env:
           TIMED: ${{ github.event_name == 'schedule' || inputs.timed == true }}
@@ -94,7 +94,7 @@ jobs:
           git commit -qm "Report charts $(ls -d */ | tail -n 1 | tr -d /)" || echo "No chart changes"
           git push -q origin HEAD:report-assets
 
-      - name: Hold until 5:00 CT
+      - name: Hold until 4:00 CT
         if: steps.gate.outputs.send == 'true'
         env:
           TARGET_EPOCH: ${{ steps.wait.outputs.target }}
@@ -105,7 +105,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh label create daily-report --color 1F3864 --description "Daily 5:00 CT report" --force >/dev/null 2>&1 || true
+          gh label create daily-report --color 1F3864 --description "Daily 4:00 CT report" --force >/dev/null 2>&1 || true
           TITLE=$(head -n 1 report.md)
           # Another run may have sent today's report while this one was holding.
           if [ "${{ github.event_name == 'schedule' || inputs.timed == true }}" = "true" ]; then

@@ -1,16 +1,16 @@
 """
-Gate for the scheduled daily report (default 05:00 America/Chicago, every day).
+Gate for the scheduled daily report (default 04:00 America/Chicago, every day).
 
 GitHub's scheduler is best-effort, and for this repo scheduled runs have started 7-8 hours
 late. So the workflow is triggered every hour, around the clock, and every run applies one rule
-against the next 05:00 CT target (today's, or tomorrow's once today's window has passed):
+against the next 04:00 CT target (today's, or tomorrow's once today's window has passed):
 
   * more than MAX_WAIT before the target       -> skip (a later run will be closer)
   * up to MAX_WAIT before the target           -> build now, hold until the target, then send
   * from the target to LATE_OK after it        -> send now (started late)
 
 The dependable trigger is the Gmail Apps Script (tools/forward_reports.gs), which starts this
-workflow at ~4:45 CT every day; the hourly GitHub schedule is only a backup.
+workflow at ~3:45 CT every day; the hourly GitHub schedule is only a backup.
 
 MAX_WAIT stays under GitHub's 6-hour job limit. The workflow then skips if today's report
 already exists, so only one report goes out per day. Manual runs always send immediately.
@@ -23,7 +23,7 @@ import time
 from zoneinfo import ZoneInfo
 
 TZ = ZoneInfo(os.environ.get("REPORT_TZ", "America/Chicago"))
-HH, MM = (int(x) for x in os.environ.get("REPORT_TIME", "05:00").split(":"))
+HH, MM = (int(x) for x in os.environ.get("REPORT_TIME", "04:00").split(":"))
 MAX_WAIT = int(os.environ.get("MAX_WAIT_MIN", "340")) * 60     # 5h40m: fits in a 6h job
 LATE_OK = int(os.environ.get("LATE_OK_MIN", "300")) * 60       # still send if GitHub is up to 5h late
 
@@ -60,7 +60,7 @@ def main():
         print("Sending.")
         return
 
-    # Timed = the hourly GitHub schedule, or the 4:45 CT trigger from the Gmail Apps Script.
+    # Timed = the hourly GitHub schedule, or the 3:45 CT trigger from the Gmail Apps Script.
     if os.environ.get("TIMED", "false") != "true":
         print("Manual run: sending now.")
         return emit(send="true", target=0)
