@@ -17,6 +17,15 @@
  * (fine-grained token, only the External-Manager repo, permission "Actions: Read and write").
  * The token stays in your Google account; it is never in this code or on GitHub.
  *
+ * Safety checks (so the report definitely goes out):
+ *   - 3:40-3:58 CT: the start request is retried every 5 minutes until GitHub accepts it.
+ *   - From 4:05 CT, every 15 minutes until 7:00: if today's report hasn't been sent and
+ *     GitHub isn't already working on it, ask GitHub again (it then sends right away).
+ *     GitHub never sends twice in one day, so extra requests are harmless.
+ *   - 4:30 CT: if the report still hasn't gone out, email ALERT_TO with what went wrong.
+ *   - If forwarding fails, ALERT_TO gets an email too. Run "checkStatus" any time for a
+ *     dry run: it reports what the checks see and changes nothing.
+ *
  * Setup: script.google.com -> project -> paste this file -> set RECIPIENTS -> Save ->
  *        run "setup" once and Allow. setup forwards nothing; the first forward is the next
  *        4:00 AM report. After adding GITHUB_TOKEN, run "checkToken" once (it sends nothing).
@@ -29,12 +38,17 @@ const WINDOW_START = "03:55";                       // CT
 const WINDOW_END = "10:05";                         // CT
 const REPO = "cadenypatel/External-Manager";
 const START_FROM = "03:40", START_UNTIL = "03:58";  // CT: when to ask GitHub to build the report
+const ALERT_TO = "";                                // your own address, for problem alerts ("" = off)
+const WATCH_FROM = "04:05", WATCH_UNTIL = "07:00";  // CT: make sure today's report went out
+const RETRY_MIN = 15;                               // minutes between extra start requests
+const ALERT_AT = "04:30";                           // CT: email ALERT_TO if still nothing by now
 
 function forwardReports() {
   const props = PropertiesService.getScriptProperties();
   const now = new Date();
   const today = Utilities.formatDate(now, TZ, "yyyy-MM-dd");
-  startReport_(props, now, today);
+  safely_(function () { startReport_(props, now, today); });
+  safely_(function () { watchdog_(props, now, today, false); });
   if (props.getProperty("lastForwardDate") === today) return;          // already sent today
 
   const installedAt = Number(props.getProperty("installedAt") || Date.now());
@@ -57,7 +71,13 @@ function forwardReports() {
   if (!candidates.length) return;
 
   candidates.sort(function (a, b) { return a.getDate() - b.getDate(); });
-  candidates[0].forward(RECIPIENTS, { name: "Equity Manager Tracker" });
+  try {
+    candidates[0].forward(RECIPIENTS, { name: "Equity Manager Tracker" });
+  } catch (err) {                                                      // retried next run
+    alertOnce_(props, today, "fwd", "The daily report arrived but forwarding it failed",
+      "Forwarding to " + RECIPIENTS + " failed: " + err + "\nIt will keep retrying every 5 minutes until " + WINDOW_END + " CT.");
+    throw err;
+  }
   props.setProperty("lastForwardDate", today);                         // one per day
 }
 
@@ -78,15 +98,91 @@ function startReport_(props, now, today) {
   const hm = Utilities.formatDate(now, TZ, "HH:mm");
   if (hm < START_FROM || hm > START_UNTIL) return;
   if (props.getProperty("lastStartDate") === today) return;
-  const token = (props.getProperty("GITHUB_TOKEN") || "").replace(/\s|"|'/g, "");
-  if (!token) return;
-  const res = UrlFetchApp.fetch(
-    "https://api.github.com/repos/" + REPO + "/actions/workflows/daily-email.yml/dispatches", {
-      method: "post", contentType: "application/json", muteHttpExceptions: true,
-      headers: { Authorization: "Bearer " + token, Accept: "application/vnd.github+json" },
-      payload: JSON.stringify({ ref: "main", inputs: { timed: true } }) });
-  if (res.getResponseCode() === 204) props.setProperty("lastStartDate", today);
-  else console.log("GitHub start failed: " + res.getResponseCode() + " " + res.getContentText());
+  if (dispatch_(props)) props.setProperty("lastStartDate", today);
+}
+
+// From 4:05 CT: if today's report isn't out and GitHub isn't working on it, ask again.
+// dryRun = only report what it sees (used by checkStatus).
+function watchdog_(props, now, today, dryRun) {
+  const hm = Utilities.formatDate(now, TZ, "HH:mm");
+  if (!dryRun && (hm < WATCH_FROM || hm > WATCH_UNTIL)) return "outside " + WATCH_FROM + "-" + WATCH_UNTIL + " CT";
+  if (!dryRun && props.getProperty("reportSeenDate") === today) return "already confirmed today";
+  if (!token_(props)) return "no GITHUB_TOKEN saved";
+  const dayStart = Utilities.parseDate(today + " 00:00", TZ, "yyyy-MM-dd HH:mm");
+
+  const issues = gh_(props, "GET", "/issues?labels=daily-report&state=all&per_page=10&since=" + dayStart.toISOString());
+  if (issues.code !== 200) {
+    note_(props, "GitHub check failed (" + issues.code + "): " + issues.text);
+  } else if (issues.json.some(function (i) { return new Date(i.created_at) >= dayStart; })) {
+    if (!dryRun) props.setProperty("reportSeenDate", today);
+    return "today's report has been sent";
+  }
+
+  const runs = gh_(props, "GET", "/actions/workflows/daily-email.yml/runs?per_page=10");
+  const busy = runs.code === 200 && runs.json.workflow_runs.some(function (r) { return r.status !== "completed"; });
+  if (busy) return "not sent yet - GitHub is working on it";
+
+  let did = "not sent yet - nothing running";
+  if (!dryRun) {
+    const last = Number(props.getProperty("lastRetryAt") || 0);
+    if (Date.now() - last >= RETRY_MIN * 60 * 1000) {
+      props.setProperty("lastRetryAt", String(Date.now()));
+      did += dispatch_(props) ? "; asked GitHub to send it now" : "; GitHub refused the request";
+    }
+    if (hm >= ALERT_AT) {
+      alertOnce_(props, today, "late", "Daily report has not gone out yet",
+        "As of " + hm + " CT today's Equity Manager Tracker report has not been sent.\n" +
+        "The script keeps asking GitHub every " + RETRY_MIN + " minutes until " + WATCH_UNTIL + " CT.\n\n" +
+        "Last GitHub message: " + (props.getProperty("lastNote") || "(none)") + "\n\n" +
+        "Check: https://github.com/" + REPO + "/actions");
+    }
+  }
+  return did;
+}
+
+// Dry run: shows what the checks see right now. Sends nothing, changes nothing.
+function checkStatus() {
+  const props = PropertiesService.getScriptProperties();
+  const now = new Date(), today = Utilities.formatDate(now, TZ, "yyyy-MM-dd");
+  console.log("Now " + Utilities.formatDate(now, TZ, "EEE HH:mm") + " CT. Report status: " + watchdog_(props, now, today, true));
+  console.log("Started today: " + (props.getProperty("lastStartDate") === today) +
+              ". Forwarded today: " + (props.getProperty("lastForwardDate") === today) +
+              ". Alerts to: " + (ALERT_TO || "(off)") + ". Last GitHub message: " + (props.getProperty("lastNote") || "(none)"));
+}
+
+function dispatch_(props) {
+  const res = gh_(props, "POST", "/actions/workflows/daily-email.yml/dispatches", { ref: "main", inputs: { timed: true } });
+  if (res.code !== 204) note_(props, "Start request failed (" + res.code + "): " + res.text);
+  return res.code === 204;
+}
+
+function gh_(props, method, path, body) {
+  const opts = { method: method.toLowerCase(), muteHttpExceptions: true,
+    headers: { Authorization: "Bearer " + token_(props), Accept: "application/vnd.github+json" } };
+  if (body) { opts.contentType = "application/json"; opts.payload = JSON.stringify(body); }
+  const res = UrlFetchApp.fetch("https://api.github.com/repos/" + REPO + path, opts);
+  const text = res.getContentText();
+  let json = null;
+  try { json = text ? JSON.parse(text) : null; } catch (e) {}
+  return { code: res.getResponseCode(), text: text.slice(0, 300), json: json };
+}
+
+function token_(props) { return (props.getProperty("GITHUB_TOKEN") || "").replace(/\s|"|'/g, ""); }
+
+function note_(props, msg) {
+  console.log(msg);
+  props.setProperty("lastNote", Utilities.formatDate(new Date(), TZ, "MMM d HH:mm") + " CT - " + msg);
+}
+
+function alertOnce_(props, today, kind, subject, body) {
+  if (!ALERT_TO || props.getProperty("alert_" + kind) === today) return;
+  props.setProperty("alert_" + kind, today);
+  GmailApp.sendEmail(ALERT_TO, "[Report check] " + subject, body);
+}
+
+// One failing check must never stop the others (or the forward).
+function safely_(fn) {
+  try { fn(); } catch (err) { console.log("Check failed: " + err); }
 }
 
 // Run once after saving GITHUB_TOKEN. Only checks the token can see the workflow; sends nothing.
