@@ -84,9 +84,26 @@
       E.vol20[t] = v;
     }
   }
+  // Lookback windows are exact calendar periods (like fund companies' trailing returns): the 1Y
+  // window ending Nov 19, 2026 starts from the close on or before Nov 19, 2025.
+  const RANGE_MONTHS = { "63": 3, "126": 6, "252": 12, "756": 36 };
+  const baseIdx = (end, months) => {                 // last trading day on or before end date - months
+    const d = new Date(E.dates[end] + "T12:00:00");
+    const day = d.getDate();
+    d.setDate(1); d.setMonth(d.getMonth() - months);
+    d.setDate(Math.min(day, new Date(d.getFullYear(), d.getMonth() + 1, 0).getDate()));
+    const iso = d.toISOString().slice(0, 10);
+    let i = end; while (i > 0 && E.dates[i] > iso) i--;
+    return i;
+  };
   const win = (end) => {
-    const start = rangeKey === "max" ? E.minIdx : Math.max(1, end - Number(rangeKey) + 1);
+    const start = rangeKey === "max" ? E.minIdx : Math.max(1, baseIdx(end, RANGE_MONTHS[rangeKey]) + 1);
     return [Math.min(start, end), end];
+  };
+  const ytdStart = (end) => {                        // first trading day of the end date's year
+    const y = E.dates[end].slice(0, 4);
+    let i = end; while (i > 0 && E.dates[i - 1].slice(0, 4) === y) i--;
+    return i;
   };
   // S&P 500 move in sigmas, measured against its own volatility over the lookback window ending the day before.
   function sigmaSeries() {
@@ -601,7 +618,7 @@
     const li = lastIdx(t);
     return {
       manager: name, ticker: t, style, stated_benchmark: sb || "", pricing_basis: basis, last_date: E.dates[li],
-      ret_1d: E.ret[t][li], ret_range: periodRet(t, a, b), vol_range: annVol(t, a, b),
+      ret_1d: E.ret[t][li], ret_ytd: periodRet(t, ytdStart(li), li), ret_range: periodRet(t, a, b), vol_range: annVol(t, a, b),
       beta_spy: beta(t, DATA.sp500, a, b), beta_stated: sb ? beta(t, sb, a, b) : null, corr_stated: sb ? corr(t, sb, a, b) : null,
       te_stated: sb ? te(t, sb, a, b) : null, up_cap: sb ? capture(t, sb, a, b, "up") : null, down_cap: sb ? capture(t, sb, a, b, "down") : null,
       max_dd: maxDD(t, a, b), obs: countObs(t, a, b),
@@ -620,6 +637,7 @@
       { key: "pricing_basis", label: "Pricing basis", txt: true },
       { key: "last_date", label: "Last price", fmt: (v) => (v ? shortDate(v) : "") },
       { key: "ret_1d", label: "1D", fmt: P, color: true },
+      { key: "ret_ytd", label: "YTD", fmt: P, color: true, title: "Total return since the last close of the prior year" },
       { key: "ret_range", label: `Return (${L})`, fmt: P, color: true },
       { key: "ret_peer_rank", label: "Return peer rank", render: rankCell },
       { key: "vol_range", label: `Vol (${L})`, fmt: (v) => pct(v, 1) },
@@ -637,7 +655,7 @@
       const med = (k) => median(rs.map((r) => r[k]));
       const si = benchFor(style);
       const footer = [
-        { manager: `${style} peer median`, ...Object.fromEntries(["ret_1d", "ret_range", "vol_range", "beta_spy", "max_dd"].map((k) => [k, med(k)])) },
+        { manager: `${style} peer median`, ...Object.fromEntries(["ret_1d", "ret_ytd", "ret_range", "vol_range", "beta_spy", "max_dd"].map((k) => [k, med(k)])) },
         ...peerBenchmarks(style).map((t) => riskRow(idxName(t), t, "Benchmark", null, t.startsWith("^") ? "Index level (close)" : "ETF close (total return)", a, b)),
       ];
       table(document.getElementById("risk" + style), cols, rs, { sortable: true, sortKey: "vol_range", asc: true, footer });
