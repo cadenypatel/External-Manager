@@ -49,7 +49,9 @@ def refresh(log=print, count=40):
     import nport_source as N
     out = load()
     for ticker, sid in SERIES.items():
-        points = {}
+        # keep the saved history; newest filings come first, so stop once we reach one we have
+        points = {p["date"]: p for p in (out.get(ticker) or {}).get("points", [])}
+        known = set(points)
         for filed, folder in N.list_filings(sid, count=count):
             try:
                 root = ET.fromstring(N._get(N._primary_doc_url(folder)))
@@ -61,6 +63,8 @@ def refresh(log=print, count=40):
             if (root.findtext(".//seriesId") or "").strip() != sid:
                 continue
             rep = (root.findtext(".//repPdDate") or "").strip()
+            if rep in known:
+                break
             if not rep or rep in points:
                 continue
             l3, names = 0.0, []

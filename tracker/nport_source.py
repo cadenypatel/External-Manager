@@ -51,11 +51,36 @@ def _get(url):
         return r.read()
 
 
+_CIK_CACHE = {}
+
+
+def series_cik(series_id):
+    """The fund company (trust) CIK that files for a series, from the SEC's mutual fund ticker list."""
+    if not _CIK_CACHE:
+        mf = json.loads(_get("https://www.sec.gov/files/company_tickers_mf.json"))
+        f = mf["fields"]
+        for row in mf["data"]:
+            d = dict(zip(f, row))
+            _CIK_CACHE.setdefault(d["seriesId"], str(d["cik"]))
+    return _CIK_CACHE.get(series_id)
+
+
 def list_filings(series_id, count=8):
-    """Recent NPORT-P filings for a fund series: [(filing_date, accession_folder_url)]."""
-    url = ("https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&CIK="
-           f"{series_id}&type=NPORT-P&dateb=&owner=include&count={count}&output=atom")
-    root = ET.fromstring(_get(url))
+    """Recent NPORT-P filings for a fund series: [(filing_date, accession_folder_url)].
+    The SEC no longer accepts series IDs in this lookup (HTTP 400), so it falls back to the
+    trust's CIK. A trust files one N-PORT per fund, so the list then holds other funds too:
+    callers must check each filing's seriesId (parse_nport does)."""
+    def fetch(key, n):
+        url = ("https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&CIK="
+               f"{key}&type=NPORT-P&dateb=&owner=include&count={n}&output=atom")
+        return ET.fromstring(_get(url))
+    try:
+        root = fetch(series_id, count)
+    except Exception:
+        cik = series_cik(series_id) if str(series_id).startswith("S") else None
+        if not cik:
+            raise
+        root = fetch(cik, 100)
     ns = {"a": "http://www.w3.org/2005/Atom"}
     out = []
     for e in root.findall("a:entry", ns):
