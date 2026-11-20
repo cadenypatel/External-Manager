@@ -23,6 +23,10 @@
  *     GitHub isn't already working on it, ask GitHub again (it then sends right away).
  *     GitHub never sends twice in one day, so extra requests are harmless.
  *   - 4:30 CT: if the report still hasn't gone out, email ALERT_TO with what went wrong.
+ *   - Website data: GitHub's own schedule runs hours late, so this script also asks GitHub to
+ *     rebuild the public site at ~9:30 PM CT (after fund NAVs post) and ~3:15 AM CT. From
+ *     4:30 to 9:00 AM it compares the site's latest data date with the 4 AM report's; if the
+ *     site is behind it asks for another rebuild (every 20 min), and at 6:00 AM emails ALERT_TO.
  *   - If forwarding fails, ALERT_TO gets an email too. Run "checkStatus" any time for a
  *     dry run: it reports what the checks see and changes nothing.
  *
@@ -42,6 +46,11 @@ const ALERT_TO = "";                                // your own address, for pro
 const WATCH_FROM = "04:05", WATCH_UNTIL = "07:00";  // CT: make sure today's report went out
 const RETRY_MIN = 15;                               // minutes between extra start requests
 const ALERT_AT = "04:30";                           // CT: email ALERT_TO if still nothing by now
+const SITE_DATA = "https://cadenypatel.github.io/External-Manager/data/data.json";
+const SITE_BUILDS = [["21:30", "21:58"], ["03:10", "03:38"]];  // CT windows: ask GitHub to rebuild the site
+const SITE_CHECK_FROM = "04:30", SITE_CHECK_UNTIL = "09:00";  // CT: make sure the site has the latest close
+const SITE_RETRY_MIN = 20;                           // minutes between extra rebuild requests
+const SITE_ALERT_AT = "06:00";                       // CT: email ALERT_TO if the site is still behind
 
 function forwardReports() {
   const props = PropertiesService.getScriptProperties();
@@ -49,6 +58,8 @@ function forwardReports() {
   const today = Utilities.formatDate(now, TZ, "yyyy-MM-dd");
   safely_(function () { startReport_(props, now, today); });
   safely_(function () { watchdog_(props, now, today, false); });
+  safely_(function () { siteBuild_(props, now, today); });
+  safely_(function () { siteWatch_(props, now, today, false); });
   if (props.getProperty("lastForwardDate") === today) return;          // already sent today
 
   const installedAt = Number(props.getProperty("installedAt") || Date.now());
@@ -145,6 +156,7 @@ function checkStatus() {
   const props = PropertiesService.getScriptProperties();
   const now = new Date(), today = Utilities.formatDate(now, TZ, "yyyy-MM-dd");
   console.log("Now " + Utilities.formatDate(now, TZ, "EEE HH:mm") + " CT. Report status: " + watchdog_(props, now, today, true));
+  console.log("Website status: " + siteWatch_(props, now, today, true));
   console.log("Started today: " + (props.getProperty("lastStartDate") === today) +
               ". Forwarded today: " + (props.getProperty("lastForwardDate") === today) +
               ". Alerts to: " + (ALERT_TO || "(off)") + ". Last GitHub message: " + (props.getProperty("lastNote") || "(none)"));
@@ -154,6 +166,61 @@ function dispatch_(props) {
   const res = gh_(props, "POST", "/actions/workflows/daily-email.yml/dispatches", { ref: "main", inputs: { timed: true } });
   if (res.code !== 204) note_(props, "Start request failed (" + res.code + "): " + res.text);
   return res.code === 204;
+}
+
+// Ask GitHub to rebuild the public website (fresh prices and every statistic).
+function siteDispatch_(props) {
+  const res = gh_(props, "POST", "/actions/workflows/public-site.yml/dispatches", { ref: "main" });
+  if (res.code !== 204) note_(props, "Site rebuild request failed (" + res.code + "): " + res.text);
+  return res.code === 204;
+}
+
+// ~9:30 PM and ~3:15 AM CT: rebuild the site once in each window.
+function siteBuild_(props, now, today) {
+  const hm = Utilities.formatDate(now, TZ, "HH:mm");
+  SITE_BUILDS.forEach(function (w, i) {
+    if (hm < w[0] || hm > w[1]) return;
+    const key = "siteBuild" + i;
+    if (props.getProperty(key) === today) return;
+    if (siteDispatch_(props)) props.setProperty(key, today);
+  });
+}
+
+// 4:30-9:00 AM CT: the site's latest data date must match the 4 AM report's (holidays included).
+function siteWatch_(props, now, today, dryRun) {
+  const hm = Utilities.formatDate(now, TZ, "HH:mm");
+  if (!dryRun && (hm < SITE_CHECK_FROM || hm > SITE_CHECK_UNTIL)) return "outside " + SITE_CHECK_FROM + "-" + SITE_CHECK_UNTIL + " CT";
+  if (!dryRun && props.getProperty("siteOkDate") === today) return "already confirmed today";
+  if (!token_(props)) return "no GITHUB_TOKEN saved";
+  if (!dryRun) {
+    const lastCheck = Number(props.getProperty("siteCheckAt") || 0);
+    if (Date.now() - lastCheck < SITE_RETRY_MIN * 60 * 1000) return "checked recently";
+    props.setProperty("siteCheckAt", String(Date.now()));
+  }
+  const issues = gh_(props, "GET", "/issues?labels=daily-report&state=all&per_page=1");
+  if (issues.code !== 200 || !issues.json.length) return "can't read the latest report";
+  const m = issues.json[0].title.match(/ · ([A-Z][a-z]{2} \d{1,2}, \d{4}) · /);
+  if (!m) return "can't read the report's data date";
+  const want = Utilities.formatDate(Utilities.parseDate(m[1], TZ, "MMM d, yyyy"), TZ, "yyyy-MM-dd");
+  const res = UrlFetchApp.fetch(SITE_DATA + "?t=" + Date.now(), { muteHttpExceptions: true });
+  let have = "";
+  try { have = JSON.parse(res.getContentText()).as_of || ""; } catch (e) {}
+  if (have && have >= want) {
+    if (!dryRun) props.setProperty("siteOkDate", today);
+    return "site is current (data through " + have + ")";
+  }
+  let did = "site is behind: has " + (have || "?") + ", latest close " + want;
+  if (!dryRun) {
+    did += siteDispatch_(props) ? "; asked GitHub to rebuild it" : "; GitHub refused the rebuild";
+    if (hm >= SITE_ALERT_AT) {
+      alertOnce_(props, today, "site", "Website data is behind",
+        "As of " + hm + " CT the public site shows data through " + (have || "?") + ", but the latest close is " + want + ".\n" +
+        "The script keeps asking GitHub to rebuild it every " + SITE_RETRY_MIN + " minutes until " + SITE_CHECK_UNTIL + " CT.\n\n" +
+        "Last GitHub message: " + (props.getProperty("lastNote") || "(none)") + "\n\n" +
+        "Check: https://github.com/" + REPO + "/actions");
+    }
+  }
+  return did;
 }
 
 function gh_(props, method, path, body) {
