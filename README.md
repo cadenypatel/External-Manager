@@ -27,6 +27,10 @@ Your Eikon key (`config/lseg.local.json`) and Eikon data (`private_data/`) are g
 | Oakmark Large Cap Value | OANMX (Institutional) | Value | S&P 500 (Russell 1000 Value secondary) |
 | BNYM Newton Dynamic Value | DRGYX (Y) | Value | Russell 1000 Value |
 
+## Public equity only (Alger)
+
+Alger Focus Equity's mutual fund (ALZFX) holds private companies an SMA can't own (Databricks, Anthropic and others; about 9–10% of assets in 2026). Those stakes are valued only occasionally, so they make the fund's daily NAV look calmer than the all-public SMA. The tracker removes them: public-stock return = fund NAV return ÷ public share, with the private share taken from the fund's SEC N-PORT filings (Level 3 holdings) and drifted daily between filings. The weight history is in `config/private_sleeves.json`; local runs refresh it from the SEC every two weeks, or run `python tracker/private_sleeve.py`. The original NAV series is kept in the data as `ALZFX_NAV`.
+
 ## Benchmarking
 
 - Peer groups never mix: growth managers are ranked only against growth peers, and value managers only against value peers.

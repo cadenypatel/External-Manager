@@ -310,7 +310,8 @@
     if (r.__footer) return `<b>${esc(v)}</b>`;
     if (r.style === "Benchmark") return esc(v);
     const f = DATA.funds.find((x) => x.ticker === r.ticker) || {};
-    return `${esc(v)}<br><span class="tag"><span class="dot ${r.style}"></span>${r.ticker} · ${f.vehicle || ""}</span>`;
+    const adj = f.adjustment ? ` · <b title="The fund holds private companies an SMA can't own (about ${num(f.adjustment.private_pct_now, 0)}% of assets per SEC filings). Returns shown are for its public stocks only.">public equity only</b>` : "";
+    return `${esc(v)}<br><span class="tag"><span class="dot ${r.style}"></span>${r.ticker} · ${f.vehicle || ""}${adj}</span>`;
   };
   const rankCell = (v, r) => (v == null ? "" : `${v} of ${r.peer_count}`);
   const bmkCell = (v) => (v ? `<span title="${esc(idxName(v))}">${esc(idxShort(v))}</span>` : "");

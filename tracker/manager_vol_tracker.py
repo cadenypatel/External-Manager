@@ -35,6 +35,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import numpy as np
 import pandas as pd
 import yfinance as yf
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import private_sleeve  # noqa: E402
 from openpyxl import Workbook
 from openpyxl.chart import Reference, ScatterChart, Series, LineChart
 from openpyxl.chart.marker import Marker
@@ -87,6 +90,8 @@ FUNDS = [
          source="BNY Mellon fact sheet, 9/30/2026"),
 ]
 
+PRIVATE_ADJ = {}   # filled by fetch_prices: funds shown as public-equity-only (see private_sleeve.py)
+
 EVENTS = [("2026-11-05", "Nov 5, 2026 sell-off")]
 AUTO_EVENT_SIGMA = 3.0
 HISTORY_START = "2019-01-01"   # a year of lookback before the earliest selectable date
@@ -110,6 +115,8 @@ ETF_NAV_FROM_EIKON = set()   # filled at run time when Eikon supplies ETF NAVs
 
 
 def pricing_basis(f):
+    if f["ticker"] in PRIVATE_ADJ:
+        return "Daily NAV (4pm ET), public equity only"
     if f["vehicle"] == "Mutual fund":
         return "Daily NAV (4pm ET)"
     return "Daily NAV (4pm ET, Eikon)" if f["ticker"] in ETF_NAV_FROM_EIKON else "Daily closing price (4pm ET)"
@@ -179,7 +186,12 @@ def fetch_prices(tickers, start, attempts=4):
     if SP500 not in px.columns or px[SP500].dropna().empty:
         raise SystemExit("No S&P 500 data returned - aborting so the last good site stays up.")
     px = px[px[SP500].notna()]
-    return px[[t for t in tickers if t in px.columns]]
+    px = px[[t for t in tickers if t in px.columns]].copy()
+    # Funds holding private companies an SMA can't own: use their public-equity-only returns.
+    px, info = private_sleeve.adjust_prices(px, log=lambda m: print(m, file=sys.stderr))
+    PRIVATE_ADJ.clear()
+    PRIVATE_ADJ.update(info)
+    return px
 
 
 # ----------------------------------------------------------------------------
@@ -405,7 +417,7 @@ def build_json(px, rets, events, cur_df=None, bench_df=None):
         "named_events": [{"date": d, "label": l} for d, l in EVENTS],
         "indexes": INDEXES, "style_index": STYLE_INDEX, "sp500": SP500,
         "peer_benchmarks": PEER_BENCHMARKS,
-        "funds": [{**f, "pricing_basis": pricing_basis(f)} for f in FUNDS],
+        "funds": [{**f, "pricing_basis": pricing_basis(f), "adjustment": PRIVATE_ADJ.get(f["ticker"])} for f in FUNDS],
         "series": {"dates": [d.strftime("%Y-%m-%d") for d in px.index],
                    "price": {t: [None if pd.isna(v) else round(float(v), 6) for v in px[t].tolist()] for t in px.columns}},
     })
@@ -642,6 +654,14 @@ def main():
     site = Path(args.site_dir)
     (site / "data").mkdir(parents=True, exist_ok=True)
 
+    # Refresh the private-stake weights from the SEC every couple of weeks (local runs only:
+    # needs sec_user_agent in config/lseg.local.json). The public build uses the committed file.
+    store = private_sleeve.STORE
+    if store.exists() and (dt.datetime.now().timestamp() - store.stat().st_mtime) > 14 * 86400:
+        try:
+            private_sleeve.refresh(log=lambda m: print(m))
+        except Exception as e:
+            print(f"  (private-stake weights not refreshed: {e})")
     print(f"Downloading {len(all_tickers())} price series (Yahoo)...")
     px = fetch_prices(all_tickers(), HISTORY_START)
 

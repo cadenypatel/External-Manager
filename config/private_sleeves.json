@@ -1,0 +1,360 @@
+{
+ "ALZFX": {
+  "series_id": "S000009201",
+  "source": "SEC Form N-PORT, Level 3 fair-value holdings",
+  "points": [
+   {
+    "date": "2019-10-31",
+    "filed": "2019-12-26",
+    "private_pct": 0.014,
+    "holdings": [
+     [
+      "PROSETTA BIOSCIENCES INC. /PFD",
+      0.014
+     ]
+    ]
+   },
+   {
+    "date": "2020-01-31",
+    "filed": "2020-03-30",
+    "private_pct": 0.012,
+    "holdings": [
+     [
+      "PROSETTA BIOSCIENCES INC. /PFD",
+      0.012
+     ]
+    ]
+   },
+   {
+    "date": "2020-04-30",
+    "filed": "2020-06-25",
+    "private_pct": 0.008,
+    "holdings": [
+     [
+      "PROSETTA BIOSCIENCES INC. /PFD",
+      0.008
+     ]
+    ]
+   },
+   {
+    "date": "2020-07-31",
+    "filed": "2020-09-29",
+    "private_pct": 0.006,
+    "holdings": [
+     [
+      "PROSETTA BIOSCIENCES INC. /PFD",
+      0.006
+     ]
+    ]
+   },
+   {
+    "date": "2020-10-31",
+    "filed": "2020-12-29",
+    "private_pct": 0.001,
+    "holdings": [
+     [
+      "PROSETTA BIOSCIENCES INC. /PFD",
+      0.001
+     ]
+    ]
+   },
+   {
+    "date": "2021-01-31",
+    "filed": "2021-04-01",
+    "private_pct": 0.001,
+    "holdings": [
+     [
+      "PROSETTA BIOSCIENCES INC. /PFD",
+      0.001
+     ]
+    ]
+   },
+   {
+    "date": "2021-04-30",
+    "filed": "2021-06-29",
+    "private_pct": 0.001,
+    "holdings": [
+     [
+      "PROSETTA BIOSCIENCES INC. /PFD",
+      0.001
+     ]
+    ]
+   },
+   {
+    "date": "2021-07-31",
+    "filed": "2021-09-29",
+    "private_pct": 0.001,
+    "holdings": [
+     [
+      "PROSETTA BIOSCIENCES INC. /PFD",
+      0.001
+     ]
+    ]
+   },
+   {
+    "date": "2021-10-31",
+    "filed": "2021-12-27",
+    "private_pct": 0.0,
+    "holdings": []
+   },
+   {
+    "date": "2022-01-31",
+    "filed": "2022-03-31",
+    "private_pct": 0.0,
+    "holdings": []
+   },
+   {
+    "date": "2022-04-30",
+    "filed": "2022-06-29",
+    "private_pct": 0.0,
+    "holdings": []
+   },
+   {
+    "date": "2022-07-31",
+    "filed": "2022-09-28",
+    "private_pct": 0.0,
+    "holdings": []
+   },
+   {
+    "date": "2022-10-31",
+    "filed": "2022-12-29",
+    "private_pct": 0.0,
+    "holdings": []
+   },
+   {
+    "date": "2023-01-31",
+    "filed": "2023-03-30",
+    "private_pct": 0.0,
+    "holdings": []
+   },
+   {
+    "date": "2023-04-30",
+    "filed": "2023-06-28",
+    "private_pct": 0.0,
+    "holdings": []
+   },
+   {
+    "date": "2023-07-31",
+    "filed": "2023-09-28",
+    "private_pct": 0.0,
+    "holdings": []
+   },
+   {
+    "date": "2023-10-31",
+    "filed": "2023-12-27",
+    "private_pct": 0.0,
+    "holdings": []
+   },
+   {
+    "date": "2024-01-31",
+    "filed": "2024-03-27",
+    "private_pct": 0.0,
+    "holdings": []
+   },
+   {
+    "date": "2024-04-30",
+    "filed": "2024-06-26",
+    "private_pct": 0.0,
+    "holdings": []
+   },
+   {
+    "date": "2024-07-31",
+    "filed": "2024-09-26",
+    "private_pct": 0.0,
+    "holdings": []
+   },
+   {
+    "date": "2024-10-31",
+    "filed": "2024-12-27",
+    "private_pct": 0.829,
+    "holdings": [
+     [
+      "SB TECHNOLOGY CORP",
+      0.829
+     ]
+    ]
+   },
+   {
+    "date": "2025-01-31",
+    "filed": "2025-03-26",
+    "private_pct": 3.386,
+    "holdings": [
+     [
+      "Databricks, Inc. Series J",
+      2.345
+     ],
+     [
+      "SB TECHNOLOGY CORP",
+      1.041
+     ]
+    ]
+   },
+   {
+    "date": "2025-04-30",
+    "filed": "2025-06-26",
+    "private_pct": 3.632,
+    "holdings": [
+     [
+      "Databricks, Inc. Series J",
+      2.516
+     ],
+     [
+      "SB TECHNOLOGY CORP",
+      1.117
+     ]
+    ]
+   },
+   {
+    "date": "2025-07-31",
+    "filed": "2025-09-26",
+    "private_pct": 2.823,
+    "holdings": [
+     [
+      "Databricks, Inc. Series J",
+      2.13
+     ],
+     [
+      "SB TECHNOLOGY CORP",
+      0.693
+     ]
+    ]
+   },
+   {
+    "date": "2025-10-31",
+    "filed": "2025-12-29",
+    "private_pct": 2.361,
+    "holdings": [
+     [
+      "Databricks, Inc. Series J",
+      1.828
+     ],
+     [
+      "SB TECHNOLOGY CORP",
+      0.5
+     ],
+     [
+      "Databricks, Inc. Series K",
+      0.033
+     ]
+    ]
+   },
+   {
+    "date": "2026-01-30",
+    "filed": "2026-03-27",
+    "private_pct": 3.573,
+    "holdings": [
+     [
+      "Databricks, Inc. Series J",
+      2.107
+     ],
+     [
+      "DISRUPTIVE TECHNOLOGY SOL",
+      0.551
+     ],
+     [
+      "SB TECHNOLOGY CORP",
+      0.455
+     ],
+     [
+      "Figure AI Inc Class C",
+      0.384
+     ],
+     [
+      "Databricks, Inc. Series K",
+      0.038
+     ],
+     [
+      "Databricks, Inc. Series L",
+      0.037
+     ]
+    ]
+   },
+   {
+    "date": "2026-04-30",
+    "filed": "2026-06-26",
+    "private_pct": 8.284,
+    "holdings": [
+     [
+      "Disruptive Technology Solutions LI, LLC Series C",
+      2.18
+     ],
+     [
+      "2026 VDC LP SPV",
+      1.612
+     ],
+     [
+      "Databricks, Inc. Series J",
+      1.554
+     ],
+     [
+      "DISRUPTIVE TECHNOLOGY SOL",
+      1.072
+     ],
+     [
+      "SB TECHNOLOGY CORP",
+      0.775
+     ],
+     [
+      "Anthropic PBC",
+      0.723
+     ],
+     [
+      "Figure AI Inc Class C",
+      0.312
+     ],
+     [
+      "Databricks, Inc. Series K",
+      0.028
+     ],
+     [
+      "Databricks, Inc. Series L",
+      0.028
+     ]
+    ]
+   },
+   {
+    "date": "2026-07-31",
+    "filed": "2026-09-25",
+    "private_pct": 9.395,
+    "holdings": [
+     [
+      "Disruptive Technology Solutions LI, LLC Series C",
+      1.87
+     ],
+     [
+      "Databricks, Inc. Series J",
+      1.866
+     ],
+     [
+      "Anthropic PBC",
+      1.409
+     ],
+     [
+      "2026 VDC LP SPV",
+      1.383
+     ],
+     [
+      "Figure AI Inc Class C",
+      1.16
+     ],
+     [
+      "Disruptive Technology Solutions LI, LLC SPV",
+      0.972
+     ],
+     [
+      "SB TECHNOLOGY CORP",
+      0.667
+     ],
+     [
+      "Databricks, Inc. Series K",
+      0.034
+     ],
+     [
+      "Databricks, Inc. Series L",
+      0.033
+     ]
+    ]
+   }
+  ]
+ }
+}

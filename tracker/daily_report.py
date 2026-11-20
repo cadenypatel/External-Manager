@@ -257,7 +257,8 @@ def render_md(d, mention=None, img_base=None):
         L.append("| Manager | 1D | 1M | YTD | Vol 1Y | Beta vs S&P | Down capture | Max DD 1Y |")
         L.append("|:--|--:|--:|--:|--:|--:|--:|--:|")
         for r in cur[cur["style"] == style].sort_values("vol1y").to_dict("records"):
-            L.append(f"| **{r['manager']}** ({r['ticker']}) | {P(r['ret_1d'])} | {P(r['ret_1m'])} | {P(r['ret_ytd'])} | "
+            tag = f"{r['ticker']}, public equity only" if r["ticker"] in M.PRIVATE_ADJ else r["ticker"]
+            L.append(f"| **{r['manager']}** ({tag}) | {P(r['ret_1d'])} | {P(r['ret_1m'])} | {P(r['ret_ytd'])} | "
                      f"{pct(r['vol1y'], 1)} | {num(r['beta_spy'])} | {num(r['down_cap'])} | {pct(r['max_dd_1y'])} |")
         si = idx[M.STYLE_INDEX[style]]
         L.append(f"| _{si['manager']}_ | _{P(si['ret_1d'])}_ | _{P(si['ret_1m'])}_ | _{P(si['ret_ytd'])}_ | _{pct(si['vol1y'], 1)}_ | _{num(si['beta_spy'])}_ | – | _{pct(si['max_dd_1y'])}_ |")
@@ -294,6 +295,9 @@ def render_md(d, mention=None, img_base=None):
         L.append(img("path_growth.png", "Growth managers: path through the shock"))
         L.append(img("path_value.png", "Value managers: path through the shock"))
 
+    for t, v in M.PRIVATE_ADJ.items():
+        L.append(f"\n<sub>{t}: the fund holds private companies an SMA can't own (about {v['private_pct_now']:.0f}% of assets, "
+                 f"per its SEC filings), so its returns are shown for its public stocks only.</sub>")
     L.append("\n---\n<sub>Public mutual fund and ETF proxies for the SMA strategies; end-of-day total returns from Yahoo Finance. "
              "No Eikon or other licensed data. For internal research and monitoring. Not investment advice.</sub>")
     title = f"Equity Manager Tracker · {fdate(last)} · S&P 500 {pct(sp['ret_1d'], sign=True)}"
